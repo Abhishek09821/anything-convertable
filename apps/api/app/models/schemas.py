@@ -9,6 +9,7 @@ class ReconstructResponse(BaseModel):
 class EditCommand(BaseModel):
     document:dict[str,Any]
     command:str=Field(min_length=1,max_length=2000)
+    selected_id:str|None=None
 
 class ExportRequest(BaseModel):
     document:dict[str,Any]

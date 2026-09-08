@@ -29,7 +29,7 @@ async def reconstruct_endpoint(file:UploadFile=File(...)):
 
 @app.post('/v1/edit')
 def edit(req:EditCommand):
-    doc=apply_command(req.document,req.command)
+    doc=apply_command(req.document,req.command,req.selected_id)
     q=score(doc); doc.setdefault('metadata',{})['quality']=q
     return {'document':doc,'quality':q}
 
