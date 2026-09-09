@@ -2,7 +2,7 @@ import os
 from pydantic import BaseModel
 
 class Settings(BaseModel):
-    app_name: str = 'Anything Editable API'
+    app_name: str = 'Anything Convertable API'
     cors_origins: list[str] = [
         'http://localhost:3000',
         'http://localhost:5173',

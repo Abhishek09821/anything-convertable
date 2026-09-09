@@ -1,5 +1,5 @@
 """
-Anything Editable — FastAPI backend
+Anything Convertable — FastAPI backend
 ====================================
 Routes
 ------
@@ -29,7 +29,7 @@ from .conversions.shared import (
     ValidationError,
 )
 
-app = FastAPI(title=settings.app_name, version='0.2.0')
+app = FastAPI(title='Anything Convertable API', version='0.2.0')
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,7 +72,7 @@ _SUGGESTION_MAP: dict[str, list[str]] = {
 
 @app.get('/health')
 def health() -> dict:
-    return {'ok': True, 'service': 'anything-editable-api', 'version': '0.2.0'}
+    return {'ok': True, 'service': 'anything-convertable-api', 'version': '0.2.0'}
 
 
 @app.get('/v1/conversions', response_model=list[ConversionMeta])
