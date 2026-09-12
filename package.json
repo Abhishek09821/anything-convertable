@@ -1,1 +1,1 @@
-{"name":"anything-editable","private":true,"workspaces":["apps/web","extension","packages/aedom"],"scripts":{"build:web":"npm --workspace apps/web run build","build:extension":"npm --workspace extension run build","build:aedom":"npm --workspace packages/aedom run build"}}
+{"name":"anything-convertable","private":true,"workspaces":["apps/web","extension","packages/aedom"],"scripts":{"build:web":"npm --workspace apps/web run build","build:extension":"npm --workspace extension run build","build:aedom":"npm --workspace packages/aedom run build"}}

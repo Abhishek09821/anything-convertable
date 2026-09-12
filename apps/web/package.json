@@ -1,5 +1,5 @@
 {
-  "name": "anything-editable-web",
+  "name": "anything-convertable-web",
   "private": true,
   "scripts": {
     "dev": "next dev",

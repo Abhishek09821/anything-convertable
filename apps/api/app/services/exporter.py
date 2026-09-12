@@ -186,7 +186,7 @@ def to_html(doc: dict) -> tuple[bytes, str]:
     body = ''.join(pages)
     markup = (
         '<!doctype html><html><head><meta charset="utf-8">'
-        '<title>Anything Editable Export</title></head>'
+        '<title>Anything Convertable Export</title></head>'
         f'<body style="margin:0;background:#e5e7eb">{body}</body></html>'
     )
     return markup.encode('utf-8'), 'text/html'

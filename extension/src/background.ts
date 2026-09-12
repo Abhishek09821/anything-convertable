@@ -1,1 +1,12 @@
-chrome.runtime.onInstalled.addListener(()=>{chrome.contextMenus.create({id:'ae-make-editable',title:'Anything Editable → Make Editable',contexts:['page','image','link']});chrome.contextMenus.create({id:'ae-analyze',title:'Anything Editable → Analyze',contexts:['page','image']})});chrome.contextMenus.onClicked.addListener((info,tab)=>{if(!tab?.id)return;if(info.menuItemId==='ae-make-editable'){chrome.tabs.create({url:'http://localhost:3000'})}else if(info.menuItemId==='ae-analyze'){chrome.tabs.create({url:'http://localhost:3000?mode=analyze'})}});
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'ac-convert',
+    title: 'Anything Convertable → Convert document',
+    contexts: ['page', 'image', 'link'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((_info, tab) => {
+  if (!tab?.id) return;
+  chrome.tabs.create({ url: 'http://localhost:3000' });
+});

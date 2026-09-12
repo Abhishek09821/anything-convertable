@@ -163,7 +163,7 @@ export default function HomePage() {
         <div className="w-8 h-8 rounded-lg bg-black text-white grid place-items-center text-sm font-bold">
           AE
         </div>
-        <span className="font-bold text-base">Anything Editable</span>
+        <span className="font-bold text-base">Anything Convertable</span>
         <span className="ml-auto text-xs text-slate-400">
           AI Document Converter
         </span>
@@ -393,7 +393,7 @@ export default function HomePage() {
       </main>
 
       <footer className="text-center text-xs text-slate-400 py-6 border-t">
-        Anything Editable · accuracy-first document conversion
+        Anything Convertable · accuracy-first document conversion
       </footer>
     </div>
   );
