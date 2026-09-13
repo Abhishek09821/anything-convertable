@@ -1,97 +1,68 @@
-// lib/api.ts — thin typed wrappers around the FastAPI backend
+export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-// ── Types (mirror app/models/schemas.py) ─────────────────────────────────────
-
-export interface ConversionMeta {
+export interface ConversionInfo {
   id: string;
   label: string;
   description: string;
-  input_types: string[];   // 'pdf' | 'image' | 'any'
+  accepts: string[];   // e.g. [".pdf"]
   output_ext: string;
   output_mime: string;
 }
 
 export interface DetectResponse {
-  doc_type: string;
-  suggested_conversions: string[];
-  page_count: number;
-  has_tables: boolean;
-  has_images: boolean;
-  text_length: number;
-  warnings: string[];
+  ext: string;
+  suggested: string[];
+  all_conversions: ConversionInfo[];
 }
 
-// ── API calls ─────────────────────────────────────────────────────────────────
-
-export async function fetchConversions(): Promise<ConversionMeta[]> {
-  const r = await fetch(`${API_BASE}/v1/conversions`);
-  if (!r.ok) throw new Error(`Failed to load conversions: ${r.status}`);
+export async function listConversions(): Promise<ConversionInfo[]> {
+  const r = await fetch(`${API}/v1/conversions`);
+  if (!r.ok) throw new Error(`Failed to load conversions (${r.status})`);
   return r.json();
 }
 
 export async function detectFile(file: File): Promise<DetectResponse> {
   const fd = new FormData();
-  fd.append('file', file);
-  const r = await fetch(`${API_BASE}/v1/detect`, { method: 'POST', body: fd });
-  if (!r.ok) {
-    const msg = await r.text().catch(() => String(r.status));
-    throw new Error(msg);
-  }
+  fd.append("file", file);
+  const r = await fetch(`${API}/v1/detect`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
   return r.json();
 }
 
 export async function convertFile(
   file: File,
   conversionId: string,
-  onProgress?: (stage: string) => void,
-): Promise<{ blob: Blob; filename: string }> {
-  onProgress?.('Uploading');
+): Promise<{ blob: Blob; filename: string; elapsed: string }> {
   const fd = new FormData();
-  fd.append('file', file);
-
-  onProgress?.('Converting');
-  const r = await fetch(`${API_BASE}/v1/convert/${conversionId}`, {
-    method: 'POST',
+  fd.append("file", file);
+  const r = await fetch(`${API}/v1/convert/${conversionId}`, {
+    method: "POST",
     body: fd,
   });
-
   if (!r.ok) {
-    const msg = await r.text().catch(() => String(r.status));
+    const msg = await r.text().catch(() => `HTTP ${r.status}`);
     throw new Error(msg);
   }
-
-  onProgress?.('Validating');
   const blob = await r.blob();
-
-  // Pull filename from Content-Disposition header
-  const cd = r.headers.get('Content-Disposition') ?? '';
+  const cd = r.headers.get("Content-Disposition") ?? "";
   const match = cd.match(/filename="([^"]+)"/);
-  const filename = match?.[1] ?? `document.${conversionId.split('_').pop()}`;
-
-  onProgress?.('Ready');
-  return { blob, filename };
+  const filename = match?.[1] ?? `converted.${conversionId.split("_").pop()}`;
+  const elapsed = r.headers.get("X-Elapsed-Seconds") ?? "?";
+  return { blob, filename, elapsed };
 }
 
-// ── Icon mapping for doc types and conversions ────────────────────────────────
-
-export const DOC_TYPE_LABELS: Record<string, string> = {
-  invoice: '🧾 Invoice',
-  resume: '📄 Resume / CV',
-  screenshot: '🖥️ Screenshot',
-  pdf: '📕 PDF',
-  image: '🖼️ Image / Scan',
-  generic: '📋 Document',
+// Icon for output format
+export const FORMAT_ICON: Record<string, string> = {
+  pdf:  "📕",
+  docx: "📝",
+  pptx: "📽️",
 };
 
-export const OUTPUT_ICONS: Record<string, string> = {
-  docx: '📝',
-  xlsx: '📊',
-  pptx: '📽️',
-  pdf: '📕',
-  html: '🌐',
-  json: '{ }',
-  csv: '📉',
+// Accepted extensions per conversion (mirrors registry)
+export const ACCEPTS_LABEL: Record<string, string> = {
+  image_to_pdf: "PNG, JPG, JPEG",
+  word_to_pdf:  "DOCX",
+  pdf_to_word:  "PDF",
+  ppt_to_pdf:   "PPTX",
+  pdf_to_ppt:   "PDF",
 };
