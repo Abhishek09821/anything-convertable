@@ -310,7 +310,7 @@ export default function Home() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium hidden sm:inline-block">
-            7 Converters Active
+            5 File Converters · Text Studio Active
           </span>
         </div>
       </header>
@@ -409,14 +409,14 @@ export default function Home() {
                 <div className="text-center">
                   <p className="font-semibold text-sm text-slate-800">Drag &amp; drop any file here, or click to browse</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    PNG · JPG · JPEG · PDF · DOCX · PPTX · TXT — up to 100 MB
+                    PNG · JPG · JPEG · PDF · DOCX · PPTX — up to 100 MB
                   </p>
                 </div>
                 <input
                   ref={dropInput}
                   type="file"
                   hidden
-                  accept=".png,.jpg,.jpeg,.pdf,.docx,.pptx,.txt"
+                  accept=".png,.jpg,.jpeg,.pdf,.docx,.pptx"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) handleDropFile(f);
@@ -506,7 +506,7 @@ export default function Home() {
                   </div>
 
                   {/* Font Customization (for converters supporting font choices) */}
-                  {(activeConv?.supports_font_choice || convId === "pdf_to_word" || convId === "pdf_to_ppt" || convId === "word_to_pdf" || convId === "ppt_to_pdf" || convId === "text_to_word" || convId === "text_to_pdf") && (
+                  {(activeConv?.supports_font_choice || convId === "pdf_to_word" || convId === "pdf_to_ppt" || convId === "word_to_pdf" || convId === "ppt_to_pdf") && (
                     <div className="pt-3 border-t border-slate-100">
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
@@ -913,7 +913,7 @@ export default function Home() {
 
       {/* ── Footer ── */}
       <footer className="text-center text-xs text-slate-400 py-6 border-t bg-white mt-auto">
-        Anything Convertable · Image→PDF · Word→PDF · PDF→Word · PPT→PDF · PDF→PPT · Text→Word · Text→PDF
+        Anything Convertable · Image→PDF · Word→PDF · PDF→Word · PPT→PDF · PDF→PPT · Text to Word / PDF Studio
       </footer>
     </div>
   );

@@ -1,10 +1,10 @@
 # Anything Convertable
 
-An **accuracy-first document conversion suite** (iLovePDF-grade) featuring 7 core converters with native layout fidelity, image preservation, font customization (Times New Roman, Arial, Calibri, Georgia), Searchable vs. Non-Searchable PDF output options, and full Hindi / Devanagari Unicode support.
+An **accuracy-first document conversion suite** (iLovePDF-grade) featuring **5 core file converters** with native layout fidelity, image preservation, font customization (Times New Roman, Arial, Calibri, Georgia), Searchable vs. Non-Searchable PDF output options, full Hindi / Devanagari Unicode support, plus a **dedicated Live Text Conversion Studio** ("Type to Word / PDF").
 
 ---
 
-## 🚀 The 7 Converters & How They Work
+## 🚀 The 5 Core File Converters & How They Work
 
 ### 1. Image → PDF (`image_to_pdf`)
 Converts PNG, JPG, JPEG, WEBP, BMP, and TIFF images into print-quality PDF documents matching the exact pixel dimensions and aspect ratio without artificial scaling or compression artifacts.
@@ -76,42 +76,31 @@ Converts PDF pages into editable PowerPoint `.pptx` slides. Each PDF page become
 
 ---
 
-### 6. Text → Word (`text_to_word`)
-Converts raw or typed text into a beautifully formatted Microsoft Word `.docx` document.
+## ✍️ Dedicated Text Conversion Studio (Type to Word / PDF)
 
-* **Under the Hood:**
-  * **`python-docx`**: Builds standard 1-inch margin business documents with clean line spacing (1.15) and paragraph spacing.
-  * **Typography Selection**: Supports Times New Roman, Arial, Calibri, and Georgia with user-selected point sizes.
-  * **Devanagari XML Pairing**: Automatically attaches `w:rFonts w:cs="..."` properties pointing to Noto Sans Devanagari, ensuring Hindi letters and matras render properly in Word.
+In addition to the 5 file converters, Anything Convertable features a dedicated **Live Text Conversion Studio** where users type or paste text directly without needing to upload files:
 
----
+### Key Features & Controls
+* **Live Typing & Pasting**: Interactive workspace with real-time character and word counters.
+* **Instant Target Toggle**: Export directly to **Word (.docx)** or **PDF (.pdf)** with a single click.
+* **Font Typography Engine**:
+  * **Times New Roman**: Classic academic & legal serif typography.
+  * **Arial**: Clean, crisp modern sans-serif.
+  * **Calibri**: Standard Microsoft Office balanced sans-serif.
+  * **Georgia**: High-contrast elegant editorial serif.
+* **Custom Font Sizes**: 10 pt, 11 pt, 12 pt, 14 pt, 16 pt.
+* **Searchable vs. Non-Searchable PDF Toggle**: Choose between clean selectable vector text or 300 DPI tamper-resistant flat raster output.
+* **Full Hindi / Devanagari Unicode**: Built-in Noto Sans Devanagari font ensures all Hindi letters, conjuncts, and matras render cleanly.
 
-### 7. Text → PDF (`text_to_pdf`)
-Converts raw or typed text into professional PDF documents.
-
-* **Under the Hood:**
-  * **ReportLab Platypus Engine**: Uses `SimpleDocTemplate`, `ParagraphStyle`, and `Spacer` for automatic pagination, word wrapping, and margins.
-  * **Unicode TrueType Registration**: Directly registers system TrueType fonts and Google Noto Sans Devanagari with ReportLab.
-  * **Searchable vs. Non-Searchable PDF**:
-    * **Searchable**: Generates vector text with copy/paste and search support.
-    * **Non-Searchable**: Flattens pages into 300 DPI raster images using PyMuPDF, providing tamper-resistant document output.
-
----
-
-## ✍️ Live Typing & Direct Text Conversion
-
-Users can type or paste text directly into the web application without uploading files:
-* Live word and character counting.
-* Instant toggle between **Word (.docx)** and **PDF (.pdf)** output.
-* Real-time font selection: **Times New Roman**, **Arial**, **Calibri**, **Georgia**.
-* Configurable font sizes: 10 pt, 11 pt, 12 pt, 14 pt, 16 pt.
-* Searchable vs. Non-Searchable PDF security toggle.
+### Technical Implementation
+* **Text → Word (`.docx`)**: Built with `python-docx` using standard 1-inch margins, 1.15 line spacing, custom point sizing, and OpenXML `<w:rFonts w:cs="Noto Sans Devanagari"/>` properties.
+* **Text → PDF (`.pdf`)**: Built with ReportLab's Platypus flowable engine (`SimpleDocTemplate`, `ParagraphStyle`, `Spacer`) with registered TrueType font metrics and optional PyMuPDF 300 DPI raster flattening.
 
 ---
 
 ## 🔒 Searchable vs. Non-Searchable PDF Options
 
-Every PDF-producing converter (`word_to_pdf`, `ppt_to_pdf`, `text_to_pdf`) includes a searchable mode option:
+Every PDF-producing converter (`word_to_pdf`, `ppt_to_pdf`, and the Text Studio PDF mode) includes a searchable mode option:
 1. **Searchable PDF (Vector Text)** *(Default)*:
    * Retains full vector text, selectable glyphs, and searchable document content.
    * Minimal file size and fast viewing.
@@ -177,14 +166,14 @@ Frontend will be live at `http://localhost:3000`.
 ```http
 GET /v1/conversions
 ```
-Returns metadata for all 7 supported converters and their supported features (`supports_font_choice` and `supports_searchable_option`).
+Returns metadata for the 5 file-based converters and their supported features (`supports_font_choice` and `supports_searchable_option`).
 
 ### 2. Detect File
 ```http
 POST /v1/detect
 Content-Type: multipart/form-data
 ```
-Inspects file magic bytes and returns matching converter suggestions.
+Inspects file magic bytes and returns matching converter suggestions among the 5 file formats.
 
 ### 3. Convert File
 ```http
@@ -193,7 +182,7 @@ Content-Type: multipart/form-data
 ```
 
 #### Parameters:
-* `conversion_id`: `image_to_pdf` | `word_to_pdf` | `pdf_to_word` | `ppt_to_pdf` | `pdf_to_ppt` | `text_to_word` | `text_to_pdf`
+* `conversion_id`: `image_to_pdf` | `word_to_pdf` | `pdf_to_word` | `ppt_to_pdf` | `pdf_to_ppt`
 * `font` *(optional)*: `original` | `Times New Roman` | `Arial` | `Calibri` | `Georgia`
 * `searchable` *(optional, for PDF outputs)*: `true` (default) or `false` (300 DPI flat raster)
 
@@ -214,6 +203,6 @@ Content-Type: application/json
 ---
 
 ## 🇮🇳 Hindi & Unicode Support
-All 7 converters feature automatic Hindi / Devanagari detection:
+All 5 file converters and the Text Conversion Studio feature automatic Hindi / Devanagari detection:
 * Bundled TrueType `NotoSansDevanagari-Regular.ttf` ensures zero missing glyphs ("tofu" boxes) on any operating system.
 * Complex script attributes (`w:cs` in Word OpenXML and `a:cs` in PowerPoint OpenXML) ensure conjuncts, matras, and ligatures display correctly across macOS, Windows, and Linux.

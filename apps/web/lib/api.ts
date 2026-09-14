@@ -67,8 +67,6 @@ export async function convertFile(
     pdf_to_word:  "docx",
     ppt_to_pdf:   "pdf",
     pdf_to_ppt:   "pptx",
-    text_to_word: "docx",
-    text_to_pdf:  "pdf",
   };
   const filename = match?.[1] ?? `converted.${OUTPUT_EXT[conversionId] ?? "file"}`;
   const elapsed = r.headers.get("X-Elapsed-Seconds") ?? "?";
@@ -124,6 +122,4 @@ export const ACCEPTS_LABEL: Record<string, string> = {
   pdf_to_word:  "PDF",
   ppt_to_pdf:   "PPTX",
   pdf_to_ppt:   "PDF",
-  text_to_word: "TXT",
-  text_to_pdf:  "TXT",
 };

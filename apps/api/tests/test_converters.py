@@ -107,9 +107,9 @@ def pptx_bytes() -> bytes:
 # ── registry ──────────────────────────────────────────────────────────────────
 
 class TestRegistry:
-    def test_all_7_conversions(self):
+    def test_all_5_conversions(self):
         from app.conversions.registry import get_all
-        assert len(get_all()) == 7
+        assert len(get_all()) == 5
 
     def test_all_ids_present(self):
         from app.conversions.registry import get_all
@@ -120,8 +120,6 @@ class TestRegistry:
             "pdf_to_word",
             "ppt_to_pdf",
             "pdf_to_ppt",
-            "text_to_word",
-            "text_to_pdf",
         }
 
     def test_get_by_id_found(self):
@@ -492,10 +490,10 @@ class TestApiRoutes:
         assert r.json()["ok"] is True
         assert r.json()["version"] == "0.3.0"
 
-    def test_list_conversions_returns_7(self, client):
+    def test_list_conversions_returns_5(self, client):
         r = client.get("/v1/conversions")
         assert r.status_code == 200
-        assert len(r.json()) == 7
+        assert len(r.json()) == 5
 
     def test_list_conversions_shape(self, client):
         r = client.get("/v1/conversions")
