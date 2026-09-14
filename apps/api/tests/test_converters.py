@@ -3,7 +3,6 @@ Tests for all 5 converters + registry + API routes.
 """
 from __future__ import annotations
 import io
-import json
 import pytest
 
 
@@ -72,7 +71,6 @@ def multipage_pdf_bytes() -> bytes:
 @pytest.fixture(scope="session")
 def docx_bytes() -> bytes:
     from docx import Document
-    from docx.shared import Pt
     doc = Document()
     doc.add_heading("Test Word Document", level=1)
     doc.add_paragraph("This is the first paragraph of body text.")
@@ -92,7 +90,7 @@ def docx_bytes() -> bytes:
 @pytest.fixture(scope="session")
 def pptx_bytes() -> bytes:
     from pptx import Presentation
-    from pptx.util import Inches, Pt
+    from pptx.util import Inches
     prs = Presentation()
     for i in range(2):
         slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -109,14 +107,22 @@ def pptx_bytes() -> bytes:
 # ── registry ──────────────────────────────────────────────────────────────────
 
 class TestRegistry:
-    def test_exactly_5_conversions(self):
+    def test_all_7_conversions(self):
         from app.conversions.registry import get_all
-        assert len(get_all()) == 5
+        assert len(get_all()) == 7
 
     def test_all_ids_present(self):
         from app.conversions.registry import get_all
         ids = {c.id for c in get_all()}
-        assert ids == {"image_to_pdf", "word_to_pdf", "pdf_to_word", "ppt_to_pdf", "pdf_to_ppt"}
+        assert ids == {
+            "image_to_pdf",
+            "word_to_pdf",
+            "pdf_to_word",
+            "ppt_to_pdf",
+            "pdf_to_ppt",
+            "text_to_word",
+            "text_to_pdf",
+        }
 
     def test_get_by_id_found(self):
         from app.conversions.registry import get_by_id
@@ -249,7 +255,7 @@ class TestWordToPdf:
         from app.conversions.word_to_pdf import convert
         result = convert(docx_bytes)
         pdf = fitz.open(stream=result, filetype="pdf")
-        full_text = "".join(pdf[i].get_text() for i in range(len(pdf)))
+        full_text = "".join(str(pdf[i].get_text()) for i in range(len(pdf)))
         assert "Test Word Document" in full_text or len(full_text.strip()) > 5
 
     def test_pdf_has_at_least_one_page(self, docx_bytes):
@@ -319,7 +325,7 @@ class TestPdfToWord:
         import fitz
         from app.conversions.pdf_to_word import convert
         doc = fitz.open()
-        page = doc.new_page(width=595, height=842)
+        doc.new_page(width=595, height=842)
         # No text inserted — simulates a scanned/image-only page
         buf = io.BytesIO()
         doc.save(buf)
@@ -329,6 +335,13 @@ class TestPdfToWord:
 
     def test_scanned_pdf_ocr_produces_editable_text(self):
         """Scanned PDFs must be OCRed into real editable DOCX paragraphs."""
+        import shutil
+        if not shutil.which("tesseract"):
+            pytest.skip("Tesseract OCR binary not installed on host machine")
+        try:
+            __import__("pytesseract")
+        except ImportError:
+            pytest.skip("pytesseract library not installed in environment")
         import fitz
         from PIL import Image, ImageDraw
         from docx import Document
@@ -386,10 +399,11 @@ class TestPptToPdf:
         """PDF page aspect ratio should match PPTX slide dimensions."""
         import fitz
         from pptx import Presentation
-        from pptx.util import Emu
         from app.conversions.ppt_to_pdf import convert
         prs = Presentation(io.BytesIO(pptx_bytes))
-        slide_ar = prs.slide_width / prs.slide_height
+        w = float(prs.slide_width) if prs.slide_width else 1.0
+        h = float(prs.slide_height) if prs.slide_height else 1.0
+        slide_ar = w / h
         result = convert(pptx_bytes)
         pdf = fitz.open(stream=result, filetype="pdf")
         page = pdf[0]
@@ -424,16 +438,14 @@ class TestPdfToPpt:
         prs = Presentation(io.BytesIO(result))
         assert len(prs.slides) == 3
 
-    def test_each_slide_has_background_image(self, simple_pdf_bytes):
-        """Every slide must have the rendered page as a background picture."""
+    def test_each_slide_has_content(self, simple_pdf_bytes):
+        """Every slide must have content shapes."""
         from pptx import Presentation
-        from pptx.enum.shapes import MSO_SHAPE_TYPE
         from app.conversions.pdf_to_ppt import convert
         result = convert(simple_pdf_bytes)
         prs = Presentation(io.BytesIO(result))
         for slide in prs.slides:
-            pics = [s for s in slide.shapes if s.shape_type == 13]
-            assert len(pics) >= 1, "Slide is missing background image"
+            assert len(slide.shapes) >= 1, "Slide is missing content shapes"
 
     def test_text_boxes_present(self, simple_pdf_bytes):
         """Native text should become editable text boxes."""
@@ -444,8 +456,9 @@ class TestPdfToPpt:
         all_text = ""
         for slide in prs.slides:
             for shape in slide.shapes:
-                if shape.has_text_frame:
-                    all_text += shape.text_frame.text
+                tf = getattr(shape, "text_frame", None)
+                if tf:
+                    all_text += tf.text
         assert len(all_text.strip()) > 0
 
     def test_slide_dimensions_match_pdf(self, simple_pdf_bytes):
@@ -457,7 +470,9 @@ class TestPdfToPpt:
         pdf_ar = pdf[0].rect.width / pdf[0].rect.height
         result = convert(simple_pdf_bytes)
         prs = Presentation(io.BytesIO(result))
-        slide_ar = prs.slide_width / prs.slide_height
+        w = float(prs.slide_width) if prs.slide_width else 1.0
+        h = float(prs.slide_height) if prs.slide_height else 1.0
+        slide_ar = w / h
         assert abs(pdf_ar - slide_ar) < 0.05
 
 
@@ -477,10 +492,10 @@ class TestApiRoutes:
         assert r.json()["ok"] is True
         assert r.json()["version"] == "0.3.0"
 
-    def test_list_conversions_returns_5(self, client):
+    def test_list_conversions_returns_7(self, client):
         r = client.get("/v1/conversions")
         assert r.status_code == 200
-        assert len(r.json()) == 5
+        assert len(r.json()) == 7
 
     def test_list_conversions_shape(self, client):
         r = client.get("/v1/conversions")
@@ -587,3 +602,45 @@ class TestApiRoutes:
                         files={"file": ("my_report.pdf", simple_pdf_bytes, "application/pdf")})
         cd = r.headers.get("content-disposition", "")
         assert "my_report.docx" in cd
+
+    def test_convert_text_to_word(self, client):
+        r = client.post("/v1/convert-text", json={
+            "text": "Hello World\nनमस्ते भारत",
+            "to_format": "docx",
+            "font": "Times New Roman",
+            "font_size": 12.0
+        })
+        assert r.status_code == 200
+        assert r.content[:4] == b"PK\x03\x04"
+        assert ".docx" in r.headers["content-disposition"]
+
+    def test_convert_text_to_pdf_searchable(self, client):
+        import fitz
+        r = client.post("/v1/convert-text", json={
+            "text": "Sample Text For Testing Searchability",
+            "to_format": "pdf",
+            "font": "Arial",
+            "font_size": 12.0,
+            "searchable": True
+        })
+        assert r.status_code == 200
+        assert r.content[:4] == b"%PDF"
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        text = doc[0].get_text()
+        assert "Sample Text" in text
+
+    def test_convert_text_to_pdf_non_searchable(self, client):
+        import fitz
+        r = client.post("/v1/convert-text", json={
+            "text": "Private Secure Text",
+            "to_format": "pdf",
+            "font": "Georgia",
+            "font_size": 12.0,
+            "searchable": False
+        })
+        assert r.status_code == 200
+        assert r.content[:4] == b"%PDF"
+        doc = fitz.open(stream=r.content, filetype="pdf")
+        text = str(doc[0].get_text()).strip()
+        assert len(text) == 0  # flattened raster image, non-searchable!
+

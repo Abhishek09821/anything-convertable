@@ -9,6 +9,8 @@ class ConversionInfo(BaseModel):
     accepts: list[str]   # file extensions, e.g. [".png", ".jpg", ".jpeg"]
     output_ext: str
     output_mime: str
+    supports_font_choice: bool = False
+    supports_searchable_option: bool = False
 
 
 class DetectResponse(BaseModel):
@@ -16,3 +18,12 @@ class DetectResponse(BaseModel):
     ext: str                          # detected file extension, e.g. ".pdf"
     suggested: list[str]              # ordered list of conversion IDs
     all_conversions: list[ConversionInfo]  # full list filtered to this file type
+
+
+class TextConvertRequest(BaseModel):
+    """Payload for direct text-to-document conversion (live typing / paste)."""
+    text: str
+    to_format: str = "docx"           # "docx" or "pdf"
+    font: str = "Calibri"             # Times New Roman, Arial, Calibri, Georgia
+    font_size: float = 12.0
+    searchable: bool = True           # applicable when to_format is "pdf"

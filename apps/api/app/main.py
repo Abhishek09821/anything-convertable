@@ -2,18 +2,21 @@
 Anything Convertable — FastAPI backend
 =======================================
 
-5 conversions:
+7 conversions:
   image_to_pdf   PNG / JPG / JPEG  → PDF
   word_to_pdf    DOCX               → PDF
   pdf_to_word    PDF                → DOCX
   ppt_to_pdf     PPTX               → PDF
   pdf_to_ppt     PDF                → PPTX
+  text_to_word   TXT / typed text   → DOCX
+  text_to_pdf    TXT / typed text   → PDF
 
 Routes:
   GET  /health
-  GET  /v1/conversions          list all 5 conversions
+  GET  /v1/conversions          list all conversions
   POST /v1/detect               detect file type, return matching conversions
-  POST /v1/convert/{id}         run conversion, stream result file
+  POST /v1/convert/{id}         run file conversion, stream result file
+  POST /v1/convert-text         run typed/pasted text conversion to DOCX or PDF
 """
 from __future__ import annotations
 
@@ -25,8 +28,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from .core.config import settings
-from .models.schemas import ConversionInfo, DetectResponse
+from .models.schemas import ConversionInfo, DetectResponse, TextConvertRequest
 from .conversions.registry import Conversion, get_all, get_by_id, get_for_file
+from .conversions.text_converter import text_to_word, text_to_pdf
 
 app = FastAPI(title=settings.app_name, version="0.3.0")
 
@@ -58,6 +62,7 @@ def _ext(filename: str, content_type: str) -> str:
         "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
         "application/msword": ".doc",
         "application/vnd.ms-powerpoint": ".ppt",
+        "text/plain": ".txt",
     }
     return _MIME_MAP.get(mime, "")
 
@@ -70,6 +75,8 @@ def _to_info(c: Conversion) -> ConversionInfo:
         accepts=sorted(c.accepts),
         output_ext=c.output_ext,
         output_mime=c.output_mime,
+        supports_font_choice=c.supports_font_choice,
+        supports_searchable_option=c.supports_searchable_option,
     )
 
 
@@ -82,7 +89,7 @@ def health() -> dict:
 
 @app.get("/v1/conversions", response_model=list[ConversionInfo])
 def list_conversions():
-    """Return all 5 supported conversions."""
+    """Return all supported conversions."""
     return [_to_info(c) for c in get_all()]
 
 
@@ -124,7 +131,12 @@ async def detect(file: UploadFile = File(...)):
 
 
 @app.post("/v1/convert/{conversion_id}")
-async def convert(conversion_id: str, file: UploadFile = File(...)):
+async def convert(
+    conversion_id: str,
+    file: UploadFile = File(...),
+    font: str = "original",
+    searchable: bool = True,
+):
     """
     Run a conversion and stream back the output file.
     """
@@ -148,11 +160,17 @@ async def convert(conversion_id: str, file: UploadFile = File(...)):
         # Soft warning only — don't block (user may rename files)
         print(f"[convert] WARNING: {filename} has ext '{ext}' but {conversion_id} accepts {conv.accepts}")
 
-    print(f"[convert] id={conversion_id} file={filename} size={len(data):,} bytes")
+    print(f"[convert] id={conversion_id} file={filename} size={len(data):,} bytes font={font} searchable={searchable}")
     t0 = time.perf_counter()
 
     try:
-        result = conv.fn(data)
+        kwargs: dict[str, object] = {}
+        if conv.supports_font_choice:
+            kwargs["font"] = font
+        if conv.supports_searchable_option:
+            kwargs["searchable"] = searchable
+
+        result = conv.fn(data, **kwargs)
     except AssertionError as exc:
         raise HTTPException(422, f"Conversion validation failed: {exc}")
     except Exception as exc:
@@ -171,6 +189,53 @@ async def convert(conversion_id: str, file: UploadFile = File(...)):
         headers={
             "Content-Disposition": f'attachment; filename="{dl_name}"',
             "X-Conversion-Id": conversion_id,
+            "X-Elapsed-Seconds": f"{elapsed:.2f}",
+        },
+    )
+
+
+@app.post("/v1/convert-text")
+async def convert_text(req: TextConvertRequest):
+    """
+    Directly convert typed or pasted text into DOCX or PDF with font and searchable options.
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(400, "Text content is empty")
+
+    fmt = req.to_format.lower().strip().lstrip(".")
+    if fmt not in ("docx", "word", "pdf"):
+        raise HTTPException(400, f"Unsupported output format '{req.to_format}'. Valid: docx, pdf")
+
+    t0 = time.perf_counter()
+    try:
+        if fmt in ("docx", "word"):
+            result = text_to_word(req.text, font=req.font, font_size=req.font_size)
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            dl_name = "typed-document.docx"
+            out_id = "text_to_word"
+        else:
+            result = text_to_pdf(
+                req.text,
+                font=req.font,
+                font_size=req.font_size,
+                searchable=req.searchable,
+            )
+            media_type = "application/pdf"
+            dl_name = "typed-document.pdf"
+            out_id = "text_to_pdf"
+    except Exception as exc:
+        print(f"[convert_text] ERROR: {exc}")
+        raise HTTPException(500, f"Text conversion failed: {exc}")
+
+    elapsed = time.perf_counter() - t0
+    print(f"[convert_text] OK {out_id} → {len(result):,} bytes in {elapsed:.2f}s")
+
+    return Response(
+        content=result,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{dl_name}"',
+            "X-Conversion-Id": out_id,
             "X-Elapsed-Seconds": f"{elapsed:.2f}",
         },
     )

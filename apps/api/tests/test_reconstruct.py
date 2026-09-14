@@ -5,7 +5,7 @@ Covers reconstruct, score, ai_edit, and exporter.
 import base64, io
 from PIL import Image as PILImage
 from app.services.ai_edit import apply_command
-from app.services.reconstruct import reconstruct, score, image_to_aedom
+from app.services.reconstruct import reconstruct, score
 from app.services.exporter import to_pdf, to_html, to_svg, _data_url_to_bytes, _hex
 
 

@@ -22,7 +22,9 @@ class Conversion:
     accepts: frozenset[str]      # e.g. frozenset({'.png', '.jpg', '.jpeg'})
     output_ext: str
     output_mime: str
-    fn: Callable[[bytes], bytes]
+    fn: Callable[..., bytes]
+    supports_font_choice: bool = False
+    supports_searchable_option: bool = False
 
 
 def _build() -> list[Conversion]:
@@ -50,6 +52,8 @@ def _build() -> list[Conversion]:
             output_ext="pdf",
             output_mime="application/pdf",
             fn=_word_pdf,
+            supports_font_choice=True,
+            supports_searchable_option=True,
         ),
         Conversion(
             id="pdf_to_word",
@@ -59,6 +63,7 @@ def _build() -> list[Conversion]:
             output_ext="docx",
             output_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             fn=_pdf_word,
+            supports_font_choice=True,
         ),
         Conversion(
             id="ppt_to_pdf",
@@ -68,6 +73,8 @@ def _build() -> list[Conversion]:
             output_ext="pdf",
             output_mime="application/pdf",
             fn=_ppt_pdf,
+            supports_font_choice=True,
+            supports_searchable_option=True,
         ),
         Conversion(
             id="pdf_to_ppt",
@@ -77,6 +84,7 @@ def _build() -> list[Conversion]:
             output_ext="pptx",
             output_mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             fn=_pdf_ppt,
+            supports_font_choice=True,
         ),
     ]
 

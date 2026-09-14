@@ -19,7 +19,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as rl_canvas
 
 
-def convert(data: bytes) -> bytes:
+def convert(data: bytes, font: str = "original", searchable: bool = True) -> bytes:
     # Open image — supports JPEG, PNG, WEBP, BMP, TIFF etc.
     try:
         im = Image.open(io.BytesIO(data))

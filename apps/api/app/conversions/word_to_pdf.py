@@ -43,8 +43,10 @@ from reportlab.platypus import (
 
 from .fonts import (
     has_non_latin,
+    register_reportlab_font,
     register_reportlab_unicode_font,
 )
+from .pdf_utils import make_non_searchable_pdf
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -242,18 +244,22 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
 
     align = _align(str(para.alignment) if para.alignment else None)
 
-    # Choose font — use Unicode font for non-Latin text
+    # Choose font — use Unicode font for non-Latin text, or resolved TrueType font
     needs_unicode = has_non_latin(full_text)
     if needs_unicode:
         font_name = unicode_bold if bold_default else unicode_font
     else:
-        font_name = "Helvetica-Bold" if bold_default else "Helvetica"
+        # Check run font name
+        run_font = ""
         if para.runs:
-            fn = (para.runs[0].font.name or "").lower()
-            if any(x in fn for x in ["times", "georgia", "garamond", "serif"]):
-                font_name = "Times-Bold" if bold_default else "Times-Roman"
-            elif any(x in fn for x in ["courier", "mono", "consolas"]):
-                font_name = "Courier-Bold" if bold_default else "Courier"
+            run_font = para.runs[0].font.name or ""
+        if not run_font and para.style and hasattr(para.style, "font") and para.style.font:
+            run_font = para.style.font.name or ""
+
+        if run_font:
+            font_name = register_reportlab_font(run_font)
+        else:
+            font_name = unicode_font
 
     if bold_default and html_text and not html_text.startswith("<b>"):
         html_text = f"<b>{html_text}</b>"
@@ -337,9 +343,15 @@ def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-def convert(data: bytes) -> bytes:
+def convert(data: bytes, font: str = "original", searchable: bool = True) -> bytes:
     # Register Unicode font for Hindi/Devanagari support
     unicode_font, unicode_bold = register_reportlab_unicode_font()
+
+    # If user specified a target font, register it
+    if font and font != "original":
+        reg = register_reportlab_font(font)
+        unicode_font = reg
+        unicode_bold = reg
 
     doc = Document(io.BytesIO(data))
     images = _extract_images(data)
@@ -357,9 +369,9 @@ def convert(data: bytes) -> bytes:
     base_font_size = 11.0
     try:
         normal_style = doc.styles["Normal"]
-        font = getattr(normal_style, "font", None)
-        if font and getattr(font, "size", None):
-            base_font_size = round(_emu_to_pt(font.size), 1)
+        font_obj = getattr(normal_style, "font", None)
+        if font_obj and getattr(font_obj, "size", None):
+            base_font_size = round(_emu_to_pt(font_obj.size), 1)
     except Exception:
         pass
 
@@ -414,4 +426,8 @@ def convert(data: bytes) -> bytes:
     result = out_buf.getvalue()
     assert result[:4] == b"%PDF", "Output is not a valid PDF"
     assert len(result) > 500
+
+    if not searchable:
+        result = make_non_searchable_pdf(result, dpi=300)
+
     return result

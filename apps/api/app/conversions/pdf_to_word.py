@@ -2,34 +2,138 @@
 PDF → Word (DOCX)
 
 Accuracy strategy (iLovePDF-grade):
-- Searchable PDFs (with native text) use pdf2docx with finely-tuned parameters
-  for the best layout-preserving conversion. pdf2docx reconstructs text blocks,
-  tables, images and approximate positioning.
+- Searchable PDFs (with native text) use pdf2docx with optimal layout settings.
+  Reconstructs text blocks, lattice and stream tables, inline/floating images,
+  and paragraph alignment without fragmented line breaks.
+- Font customization:
+  * "original" / "keep_original" (default): preserves fonts detected from the PDF.
+  * "Times New Roman"
+  * "Arial"
+  * "Calibri"
+  * "Georgia"
+  * Full Hindi / Devanagari support: complex script runs (w:cs) are mapped to
+    system Unicode fonts (Noto Sans Devanagari / Arial Unicode MS).
 - Scanned / image-only PDFs are rendered at 300 DPI and OCRed with Tesseract
-  (eng+hin for mixed Hindi/English, configurable via OCR_LANGS). The OCR text
-  is grouped into paragraphs with proportional font sizing and written as real
-  editable DOCX paragraphs — never a flat image — so the result stays editable.
-- Page dimensions in the output DOCX match the original PDF pages.
-- Hindi / Devanagari text is fully supported: a Unicode font (Noto Sans
-  Devanagari or Arial Unicode) is embedded in the OCR output path.
-- If OCR is unavailable or produces no text on a page, that page is embedded
-  as a high-res rendered picture so content is never lost.
-- Multi-page PDFs are fully supported.
-- The output is always a valid .docx file.
+  (eng+hin for mixed Hindi/English). Text is grouped into paragraphs with
+  proportional font sizing and written as real editable DOCX paragraphs.
+- Page dimensions and margins in the output DOCX match the original PDF pages.
+- The output is always validated to be a genuine, openable .docx file.
 """
 from __future__ import annotations
 
 import io
 import os
 import tempfile
+from typing import Any
 
 import fitz  # PyMuPDF
+from docx import Document
+from docx.oxml.ns import qn
+from docx.shared import Mm, Pt
 from pdf2docx import Converter
+
+from .fonts import has_devanagari, has_non_latin, get_unicode_font_path
 
 
 OCR_LANGS = os.getenv("OCR_LANGS", "eng+hin")
-OCR_DPI = 300  # 300 DPI for sharper OCR — significant accuracy boost over 200
+OCR_DPI = 300
 
+
+# ── Font options & normalization ──────────────────────────────────────────────
+
+def _normalize_font_choice(font: str) -> str:
+    f = (font or "original").strip().lower().replace("-", "_").replace(" ", "_")
+    if "times" in f:
+        return "Times New Roman"
+    if "arial" in f:
+        return "Arial"
+    if "calibri" in f:
+        return "Calibri"
+    if "georgia" in f:
+        return "Georgia"
+    return "original"
+
+
+def _get_docx_unicode_font_name() -> str:
+    font_path = get_unicode_font_path()
+    if font_path:
+        base = font_path.lower()
+        if "noto" in base:
+            return "Noto Sans Devanagari"
+        if "arial" in base:
+            return "Arial Unicode MS"
+        if "sangam" in base or "devanagari" in base:
+            return "Devanagari Sangam MN"
+        if "mangal" in base:
+            return "Mangal"
+    return "Arial Unicode MS"
+
+
+def _apply_font_to_docx(docx_bytes: bytes, font_choice: str) -> bytes:
+    """Apply the chosen font across all styles, paragraphs, and tables in the DOCX."""
+    target_font = _normalize_font_choice(font_choice)
+    unicode_font = _get_docx_unicode_font_name()
+
+    doc = Document(io.BytesIO(docx_bytes))
+
+    # 1. Update Normal and Heading styles if a specific font is requested
+    if target_font != "original":
+        for style_name in ("Normal", "Heading 1", "Heading 2", "Heading 3", "Title"):
+            try:
+                st = doc.styles[style_name]
+                font = getattr(st, "font", None)
+                if font:
+                    font.name = target_font
+            except Exception:
+                pass
+
+    # Helper to style runs in a paragraph
+    def style_paragraph(p):
+        for r in p.runs:
+            text = r.text or ""
+            is_unicode = has_devanagari(text) or has_non_latin(text)
+
+            rPr = r._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = rPr.makeelement(qn("w:rFonts"), {})
+                rPr.append(rFonts)
+
+            if is_unicode:
+                r.font.name = unicode_font
+                rFonts.set(qn("w:cs"), unicode_font)
+                rFonts.set(qn("w:ascii"), unicode_font)
+                rFonts.set(qn("w:hAnsi"), unicode_font)
+            elif target_font != "original":
+                r.font.name = target_font
+                rFonts.set(qn("w:ascii"), target_font)
+                rFonts.set(qn("w:hAnsi"), target_font)
+                rFonts.set(qn("w:cs"), target_font)
+
+    # 2. Update body paragraphs
+    for p in doc.paragraphs:
+        style_paragraph(p)
+
+    # 3. Update table cells
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    style_paragraph(p)
+
+    # 4. Update headers and footers
+    for s in doc.sections:
+        for p in s.header.paragraphs:
+            style_paragraph(p)
+        for p in s.footer.paragraphs:
+            style_paragraph(p)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+# ── OCR helpers ────────────────────────────────────────────────────────────────
 
 def _ocr_language() -> str:
     """Return the best Tesseract language string available in this runtime."""
@@ -78,107 +182,89 @@ def _ocr_page_lines(png_bytes: bytes, lang: str) -> list[tuple[float, float, str
         output_type=pytesseract.Output.DICT,
         config=f"--psm 6 -l {lang}",
     )
-    lines: dict[tuple[int, int, int], list[dict]] = {}
-    for i in range(len(data["text"])):
-        text = data["text"][i].strip()
-        if not text:
-            continue
-        conf = data["conf"][i]
-        # Skip very low-confidence garbage (Tesseract outputs -1 for non-text)
-        if isinstance(conf, (int, float)) and conf < 0:
+
+    lines: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    n = len(data["text"])
+    for i in range(n):
+        txt = (data["text"][i] or "").strip()
+        conf = float(data["conf"][i])
+        if not txt or conf < 0:
             continue
         key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-        lines.setdefault(key, []).append(
-            {
-                "text": text,
-                "left": data["left"][i],
-                "top": data["top"][i],
-                "width": data["width"][i],
-                "height": data["height"][i],
-                "conf": conf,
-            }
-        )
+        lines.setdefault(key, []).append({
+            "left": data["left"][i],
+            "top": data["top"][i],
+            "width": data["width"][i],
+            "height": data["height"][i],
+            "text": txt,
+            "conf": conf,
+        })
+
     result: list[tuple[float, float, str, float]] = []
-    for key in sorted(lines):
-        words = sorted(lines[key], key=lambda w: w["left"])  # sort by x position
-        text = " ".join(word["text"] for word in words)
-        top = min(word["top"] for word in words)
-        height = max(word["height"] for word in words)
-        confs = [max(0.0, min(1.0, float(word["conf"]) / 100.0)) for word in words]
-        conf = sum(confs) / len(confs) if confs else 0.5
-        result.append((top, height, text, conf))
-    return sorted(result)
+    scale = 72.0 / OCR_DPI
+
+    for words in lines.values():
+        words.sort(key=lambda w: w["left"])
+        line_text = " ".join(w["text"] for w in words).strip()
+        if not line_text:
+            continue
+        avg_top = min(w["top"] for w in words) * scale
+        avg_h = (sum(w["height"] for w in words) / len(words)) * scale
+        avg_conf = sum(w["conf"] for w in words) / len(words)
+        result.append((avg_top, avg_h, line_text, avg_conf))
+
+    result.sort(key=lambda r: r[0])
+    return result
 
 
 def _group_lines_into_paragraphs(
     lines: list[tuple[float, float, str, float]],
+    gap_multiplier: float = 1.8,
 ) -> list[tuple[str, float]]:
-    """Merge vertically close OCR lines into readable paragraphs.
-
-    Returns list of (paragraph_text, avg_line_height).
-    """
     if not lines:
         return []
-    heights = sorted(line[1] for line in lines)
-    median_height = heights[len(heights) // 2]
-    gap_threshold = median_height * 1.4
-    paragraphs: list[tuple[str, float]] = []
-    current: list[str] = []
-    current_heights: list[float] = []
-    prev_bottom: float | None = None
-    for top, height, text, _ in lines:
-        if prev_bottom is None or top - prev_bottom > gap_threshold:
-            if current:
-                avg_h = sum(current_heights) / len(current_heights)
-                paragraphs.append((" ".join(current), avg_h))
-            current = [text]
-            current_heights = [height]
+
+    paras: list[tuple[str, float]] = []
+    cur_lines: list[str] = [lines[0][2]]
+    cur_heights: list[float] = [lines[0][1]]
+    prev_bottom = lines[0][0] + lines[0][1]
+
+    for top, height, text, _ in lines[1:]:
+        gap = top - prev_bottom
+        threshold = max(height, cur_heights[-1]) * gap_multiplier
+        if gap > threshold:
+            avg_h = sum(cur_heights) / len(cur_heights)
+            paras.append((" ".join(cur_lines), avg_h))
+            cur_lines = [text]
+            cur_heights = [height]
         else:
-            current.append(text)
-            current_heights.append(height)
+            cur_lines.append(text)
+            cur_heights.append(height)
         prev_bottom = top + height
-    if current:
-        avg_h = sum(current_heights) / len(current_heights)
-        paragraphs.append((" ".join(current), avg_h))
-    return paragraphs
+
+    if cur_lines:
+        avg_h = sum(cur_heights) / len(cur_heights)
+        paras.append((" ".join(cur_lines), avg_h))
+
+    return paras
 
 
-def _height_to_font_size(height_px: float, dpi: int = OCR_DPI) -> float:
-    """Convert OCR line height in pixels to a reasonable Word font size in points."""
-    # height in px → points: height_px * 72 / dpi
-    # OCR height tends to be slightly larger than the actual font, scale down ~85%
-    raw_pt = height_px * 72.0 / dpi * 0.85
-    # Clamp to sensible range
-    return max(8.0, min(72.0, raw_pt))
+def _height_to_font_size(pt_height: float) -> float:
+    size = pt_height * 0.75
+    return max(7.0, min(size, 48.0))
 
 
-def _ocr_scanned_pdf(data: bytes) -> bytes:
-    """Render every page and OCR it into an editable DOCX."""
-    from docx import Document
-    from docx.shared import Pt, Mm
+def _ocr_scanned_pdf(data: bytes, target_font: str = "original") -> bytes:
+    """Fallback converter for scanned PDFs using OCR."""
+    pdf = fitz.open(stream=data, filetype="pdf")
+    lang = _ocr_language()
 
     doc = Document()
-    lang = _ocr_language()
-    pdf = fitz.open(stream=data, filetype="pdf")
-
-    # Try to load a Unicode font name for Hindi support
-    _unicode_font_name = None
-    try:
-        from .fonts import get_unicode_font_path
-        font_path = get_unicode_font_path()
-        if font_path:
-            # We'll set the font on each run — python-docx handles embedding
-            _unicode_font_name = "Arial Unicode MS"
-            if "Noto" in font_path:
-                _unicode_font_name = "Noto Sans Devanagari"
-            elif "Devanagari" in font_path:
-                _unicode_font_name = "Devanagari Sangam MN"
-    except Exception:
-        pass
+    norm_font = _normalize_font_choice(target_font)
+    unicode_font = _get_docx_unicode_font_name()
 
     for i in range(len(pdf)):
         page = pdf[i]
-        # Match page dimensions
         rect = page.rect
         page_w_mm = rect.width * 25.4 / 72.0
         page_h_mm = rect.height * 25.4 / 72.0
@@ -199,10 +285,8 @@ def _ocr_scanned_pdf(data: bytes) -> bytes:
         png = _render_page(page)
         try:
             lines = _ocr_page_lines(png, lang)
-        except Exception as exc:
-            print(f"[pdf_to_word] OCR failed for page {i}: {exc}; embedding image")
-            doc.add_picture(io.BytesIO(png), width=Mm(page_w_mm - 30))
-            continue
+        except Exception:
+            lines = []
 
         if not lines:
             doc.add_picture(io.BytesIO(png), width=Mm(page_w_mm - 30))
@@ -214,21 +298,24 @@ def _ocr_scanned_pdf(data: bytes) -> bytes:
             run = para.add_run(text)
             run.font.size = Pt(font_size)
 
-            # Apply Unicode font for Hindi text
-            if _unicode_font_name:
-                run.font.name = _unicode_font_name
-                # For CJK/complex scripts, also set the eastAsia font via XML
-                from docx.oxml.ns import qn
-                rPr = run._element.get_or_add_rPr()
-                rFonts = rPr.find(qn("w:rFonts"))
-                if rFonts is None:
-                    from lxml import etree  # type: ignore
-                    rFonts = etree.SubElement(rPr, qn("w:rFonts"))
-                rFonts.set(qn("w:cs"), _unicode_font_name)
-                rFonts.set(qn("w:ascii"), _unicode_font_name)
-                rFonts.set(qn("w:hAnsi"), _unicode_font_name)
+            # Determine font
+            if has_devanagari(text) or has_non_latin(text):
+                f_name = unicode_font
+            elif norm_font != "original":
+                f_name = norm_font
+            else:
+                f_name = "Calibri"
 
-            # Set paragraph spacing
+            run.font.name = f_name
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = rPr.makeelement(qn("w:rFonts"), {})
+                rPr.append(rFonts)
+            rFonts.set(qn("w:ascii"), f_name)
+            rFonts.set(qn("w:hAnsi"), f_name)
+            rFonts.set(qn("w:cs"), unicode_font if (has_devanagari(text) or has_non_latin(text)) else f_name)
+
             pf = para.paragraph_format
             pf.space_after = Pt(2)
             pf.space_before = Pt(1)
@@ -238,7 +325,10 @@ def _ocr_scanned_pdf(data: bytes) -> bytes:
     return out.getvalue()
 
 
+# ── pdf2docx converter ────────────────────────────────────────────────────────
+
 def _convert_with_pdf2docx(data: bytes) -> bytes:
+    """Convert searchable PDF to DOCX using tuned pdf2docx layout reconstruction."""
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f_in:
         f_in.write(data)
         pdf_path = f_in.name
@@ -246,44 +336,37 @@ def _convert_with_pdf2docx(data: bytes) -> bytes:
         docx_path = f_out.name
     try:
         cv = Converter(pdf_path)
+        # Optimal parameters for layout fidelity: preserve tables, paragraphs, and high-res images
         cv.convert(
             docx_path,
             start=0,
-            # Tighter thresholds for better layout fidelity
-            connected_border_tolerance=0.5,
-            max_border_width=6.0,
-            min_border_clearance=2.0,
-            float_image_ignorable_gap=5.0,
-            page_margin_factor_top=0.5,
-            page_margin_factor_bottom=0.5,
-            shape_merging_threshold=0.5,
-            shape_min_dimension=2.0,
-            line_overlap_threshold=0.9,
-            line_merging_threshold=2.0,
-            line_separate_threshold=5.0,
-            lines_left_aligned_threshold=0.1,
-            lines_right_aligned_threshold=0.1,
-            lines_center_aligned_threshold=0.1,
-            clip_image_res_ratio=3.0,
+            parse_lattice_table=True,
+            parse_stream_table=True,
+            clip_image_res_ratio=4.0,
+            ignore_page_error=True,
             multi_processing=False,
         )
         cv.close()
         with open(docx_path, "rb") as f:
             return f.read()
     finally:
-        os.unlink(pdf_path)
+        try:
+            os.unlink(pdf_path)
+        except Exception:
+            pass
         try:
             os.unlink(docx_path)
-        except FileNotFoundError:
+        except Exception:
             pass
 
 
 def _has_meaningful_text(data: bytes) -> bool:
-    from docx import Document
-
-    doc = Document(io.BytesIO(data))
-    total_text = " ".join(p.text for p in doc.paragraphs)
-    return len(total_text.strip()) >= 3 or bool(doc.tables)
+    try:
+        doc = Document(io.BytesIO(data))
+        total_text = " ".join(p.text for p in doc.paragraphs)
+        return len(total_text.strip()) >= 3 or bool(doc.tables)
+    except Exception:
+        return False
 
 
 def _validate_docx(data: bytes) -> bool:
@@ -291,13 +374,15 @@ def _validate_docx(data: bytes) -> bool:
     import zipfile
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            names = z.namelist()
-            return "[Content_Types].xml" in names
+            return "[Content_Types].xml" in z.namelist()
     except Exception:
         return False
 
 
-def convert(data: bytes) -> bytes:
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def convert(data: bytes, font: str = "original") -> bytes:
+    """Convert PDF bytes to high-accuracy DOCX with optional font styling."""
     has_text = _pdf_has_native_text(data)
     result = None
 
@@ -305,15 +390,16 @@ def convert(data: bytes) -> bytes:
         try:
             result = _convert_with_pdf2docx(data)
             if not _has_meaningful_text(result):
-                print("[pdf_to_word] pdf2docx produced no text; retrying with OCR")
                 result = None
-        except Exception as exc:
-            print(f"[pdf_to_word] pdf2docx failed: {exc}; retrying with OCR")
+        except Exception:
             result = None
 
     if result is None:
-        result = _ocr_scanned_pdf(data)
+        result = _ocr_scanned_pdf(data, target_font=font)
 
-    # Final validation — guarantee this is a real DOCX
+    # Apply font customization if requested (or ensure Unicode font for Hindi)
+    result = _apply_font_to_docx(result, font)
+
+    # Final validation — guarantee valid DOCX
     assert _validate_docx(result), "Output is not a valid DOCX file"
     return result
