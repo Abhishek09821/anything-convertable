@@ -53,8 +53,8 @@ def _build() -> list[Conversion]:
         ),
         Conversion(
             id="pdf_to_word",
-            label="PDF → Word",
-            description="Convert a PDF to an editable DOCX, reconstructing layout, tables and images.",
+            label="PDF → Word (.docx)",
+            description="Convert a PDF to an editable Microsoft Word document (.docx), reconstructing layout, tables and images.",
             accepts=frozenset({".pdf"}),
             output_ext="docx",
             output_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

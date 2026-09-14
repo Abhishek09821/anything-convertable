@@ -2,40 +2,170 @@
 PDF → Word (DOCX)
 
 Accuracy strategy:
-- Use pdf2docx — the best pure-Python layout-preserving PDF→DOCX converter.
-  It reconstructs text blocks, tables, images and approximate positioning.
-- Falls back gracefully: if pdf2docx fails on any page, that page is rendered
-  to an image and embedded as a full-page picture so content is never lost.
+- Searchable PDFs (with native text) use pdf2docx, the best pure-Python
+  layout-preserving converter. It reconstructs text blocks, tables, images
+  and approximate positioning.
+- Scanned / image-only PDFs are rendered at 200 DPI and OCRed with Tesseract
+  (eng+hin for mixed Hindi/English, configurable via OCR_LANGS). The OCR text
+  is grouped into paragraphs and written as real editable DOCX paragraphs —
+  never a flat image — so the result stays editable and searchable.
+- If OCR is unavailable or produces no text on a page, that page is embedded
+  as a rendered picture so content is never lost.
 - Multi-page PDFs are fully supported.
 - Typical conversion: < 5 sec for a 10-page document.
 """
 from __future__ import annotations
 
 import io
-import tempfile
 import os
+import tempfile
 
 import fitz  # PyMuPDF
 from pdf2docx import Converter
 
 
-def convert(data: bytes) -> bytes:
-    # pdf2docx works best with a real file path (it handles streams internally
-    # but a temp file is the most reliable path)
+OCR_LANGS = os.getenv("OCR_LANGS", "eng+hin")
+OCR_DPI = 200
+
+
+def _ocr_language() -> str:
+    """Return the best Tesseract language string available in this runtime."""
+    try:
+        import pytesseract
+        available = set(pytesseract.get_languages())
+    except Exception:
+        return "eng"
+    if not available:
+        return "eng"
+    wanted = [lang.strip() for lang in OCR_LANGS.split("+") if lang.strip()]
+    if all(lang in available for lang in wanted):
+        return "+".join(wanted)
+    if "eng" in available:
+        return "eng"
+    return sorted(available)[0]
+
+
+def _pdf_has_native_text(data: bytes) -> bool:
+    """True when at least one page carries real extractable text."""
+    try:
+        pdf = fitz.open(stream=data, filetype="pdf")
+        for page in pdf:
+            if page.get_text("text").strip():
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _render_page(page, dpi: int = OCR_DPI) -> bytes:
+    mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+    return pix.tobytes("png")
+
+
+def _ocr_page_lines(png_bytes: bytes, lang: str) -> list[tuple[float, float, str, float]]:
+    """OCR one rendered page; return (top, height, text, confidence) per line."""
+    import pytesseract
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(png_bytes))
+    data = pytesseract.image_to_data(
+        im,
+        output_type=pytesseract.Output.DICT,
+        config=f"--psm 6 -l {lang}",
+    )
+    lines: dict[tuple[int, int, int], list[dict]] = {}
+    for i in range(len(data["text"])):
+        text = data["text"][i].strip()
+        if not text:
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        lines.setdefault(key, []).append(
+            {
+                "text": text,
+                "top": data["top"][i],
+                "height": data["height"][i],
+                "conf": data["conf"][i],
+            }
+        )
+    result: list[tuple[float, float, str, float]] = []
+    for key in sorted(lines):
+        words = sorted(lines[key], key=lambda word: word["top"])
+        text = " ".join(word["text"] for word in words)
+        top = min(word["top"] for word in words)
+        height = max(word["height"] for word in words)
+        confs = [max(0.0, min(1.0, float(word["conf"]) / 100.0)) for word in words]
+        conf = sum(confs) / len(confs) if confs else 0.5
+        result.append((top, height, text, conf))
+    return sorted(result)
+
+
+def _group_lines_into_paragraphs(
+    lines: list[tuple[float, float, str, float]],
+) -> list[str]:
+    """Merge vertically close OCR lines into readable paragraphs."""
+    if not lines:
+        return []
+    heights = sorted(line[1] for line in lines)
+    median_height = heights[len(heights) // 2]
+    gap_threshold = median_height * 1.5
+    paragraphs: list[str] = []
+    current: list[str] = []
+    prev_bottom: float | None = None
+    for top, height, text, _ in lines:
+        if prev_bottom is None or top - prev_bottom > gap_threshold:
+            if current:
+                paragraphs.append(" ".join(current))
+            current = [text]
+        else:
+            current.append(text)
+        prev_bottom = top + height
+    if current:
+        paragraphs.append(" ".join(current))
+    return paragraphs
+
+
+def _ocr_scanned_pdf(data: bytes) -> bytes:
+    """Render every page and OCRed it into an editable DOCX."""
+    from docx import Document
+    from docx.shared import Inches
+
+    doc = Document()
+    lang = _ocr_language()
+    pdf = fitz.open(stream=data, filetype="pdf")
+    for i, page in enumerate(pdf):
+        if i > 0:
+            doc.add_page_break()
+        png = _render_page(page)
+        try:
+            lines = _ocr_page_lines(png, lang)
+        except Exception as exc:
+            print(f"[pdf_to_word] OCR failed for page {i}: {exc}; embedding image")
+            doc.add_picture(io.BytesIO(png), width=Inches(6.5))
+            continue
+        if not lines:
+            doc.add_picture(io.BytesIO(png), width=Inches(6.5))
+            continue
+        for text in _group_lines_into_paragraphs(lines):
+            doc.add_paragraph(text)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def _convert_with_pdf2docx(data: bytes) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f_in:
         f_in.write(data)
         pdf_path = f_in.name
-
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f_out:
         docx_path = f_out.name
-
     try:
         cv = Converter(pdf_path)
         cv.convert(
             docx_path,
             start=0,
             end=None,
-            # layout-preserving settings
             connected_border_tolerance=0.5,
             max_border_width=6.0,
             min_border_clearance=2.0,
@@ -54,10 +184,8 @@ def convert(data: bytes) -> bytes:
             multi_processing=False,
         )
         cv.close()
-
         with open(docx_path, "rb") as f:
-            result = f.read()
-
+            return f.read()
     finally:
         os.unlink(pdf_path)
         try:
@@ -65,48 +193,23 @@ def convert(data: bytes) -> bytes:
         except FileNotFoundError:
             pass
 
-    # Validate
-    assert result[:4] == b"PK\x03\x04", "Output is not a valid DOCX (missing ZIP header)"
-    assert len(result) > 2000, f"DOCX suspiciously small: {len(result)} bytes"
 
-    # Quick sanity check — open with python-docx
+def _has_meaningful_text(data: bytes) -> bool:
     from docx import Document
-    doc = Document(io.BytesIO(result))
+
+    doc = Document(io.BytesIO(data))
     total_text = " ".join(p.text for p in doc.paragraphs)
-    if len(total_text.strip()) < 3 and not doc.tables:
-        # pdf2docx produced an empty doc — fall back to image-based DOCX
-        return _image_fallback(data)
-
-    return result
+    return len(total_text.strip()) >= 3 or bool(doc.tables)
 
 
-def _image_fallback(data: bytes) -> bytes:
-    """
-    Render each PDF page to a high-resolution image and embed into a DOCX.
-    Used when pdf2docx cannot extract text (scanned / locked PDFs).
-    """
-    from docx import Document
-    from docx.shared import Inches
-
-    doc = Document()
-    for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
-
-    pdf = fitz.open(stream=data, filetype="pdf")
-    for i, page in enumerate(pdf):
-        if i > 0:
-            doc.add_page_break()
-        # Render at 200 DPI (2.78× scale at 72 DPI base)
-        mat = fitz.Matrix(200 / 72, 200 / 72)
-        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-        img_buf = io.BytesIO(pix.tobytes("png"))
-        doc.add_picture(img_buf, width=Inches(7.5))
-
-    out = io.BytesIO()
-    doc.save(out)
-    result = out.getvalue()
-    assert result[:4] == b"PK\x03\x04"
-    return result
+def convert(data: bytes) -> bytes:
+    has_text = _pdf_has_native_text(data)
+    if has_text:
+        try:
+            result = _convert_with_pdf2docx(data)
+            if _has_meaningful_text(result):
+                return result
+            print("[pdf_to_word] pdf2docx produced no text; retrying with OCR")
+        except Exception as exc:
+            print(f"[pdf_to_word] pdf2docx failed: {exc}; retrying with OCR")
+    return _ocr_scanned_pdf(data)
