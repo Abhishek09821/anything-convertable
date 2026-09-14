@@ -54,7 +54,7 @@ const TILES = [
     icon: "📕",
     arrow: "📝",
     title: "PDF → Word",
-    subtitle: "PDF",
+    subtitle: "PDF → DOCX",
     accepts: ".pdf",
   },
   {

@@ -205,6 +205,20 @@ class TestImageToPdf:
         assert abs(page.rect.width  - im.width  * 72 / 96) < 3
         assert abs(page.rect.height - im.height * 72 / 96) < 3
 
+    def test_real_dpi_metadata_preserved(self):
+        """JPEGs with real DPI metadata must keep their physical print size."""
+        import fitz
+        from PIL import Image
+        from app.conversions.image_to_pdf import convert
+        im = Image.new("RGB", (300, 200), color=(200, 200, 200))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=95, dpi=(300, 300))
+        result = convert(buf.getvalue())
+        pdf = fitz.open(stream=result, filetype="pdf")
+        page = pdf[0]
+        assert abs(page.rect.width - 300 * 72 / 300) < 3
+        assert abs(page.rect.height - 200 * 72 / 300) < 3
+
     def test_large_image(self):
         """4000×3000 image should convert without error."""
         from PIL import Image
@@ -312,6 +326,27 @@ class TestPdfToWord:
         result = convert(buf.getvalue())
         assert result[:4] == b"PK\x03\x04"
         assert len(result) > 2000  # fallback embeds rendered image
+
+    def test_scanned_pdf_ocr_produces_editable_text(self):
+        """Scanned PDFs must be OCRed into real editable DOCX paragraphs."""
+        import fitz
+        from PIL import Image, ImageDraw
+        from docx import Document
+        from app.conversions.pdf_to_word import convert
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        im = Image.new("RGB", (595, 842), (255, 255, 255))
+        ImageDraw.Draw(im).text((72, 80), "SCANNED OCR TEST DOCUMENT", fill=(0, 0, 0))
+        ImageDraw.Draw(im).text((72, 120), "Editable text from OCR.", fill=(0, 0, 0))
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        page.insert_image(rect=fitz.Rect(0, 0, 595, 842), stream=buf.getvalue())
+        pdf_buf = io.BytesIO()
+        doc.save(pdf_buf)
+        result = convert(pdf_buf.getvalue())
+        out = Document(io.BytesIO(result))
+        full = " ".join(p.text for p in out.paragraphs)
+        assert len(full.strip()) > 10, "OCR text must be present and editable"
 
 
 # ── converter 4: ppt → pdf ────────────────────────────────────────────────────

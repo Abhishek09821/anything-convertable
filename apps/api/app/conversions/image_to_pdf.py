@@ -24,14 +24,15 @@ def convert(data: bytes) -> bytes:
     # Normalise rotation from EXIF so the PDF is always upright
     im = _apply_exif_rotation(im)
 
-    # Read DPI from image metadata; default to 96 dpi if absent
+    # Read DPI from image metadata; default to 96 dpi if absent.
+    # JFIF density (1, 1) means "no physical density" and must not be
+    # interpreted as 1 DPI (that would produce a 57600pt-wide page).
     dpi_info = im.info.get("dpi") or im.info.get("jfif_density")
+    dpi_x = dpi_y = 96.0
     if isinstance(dpi_info, (tuple, list)) and len(dpi_info) == 2:
-        dpi_x, dpi_y = float(dpi_info[0]), float(dpi_info[1])
-        if dpi_x == 0: dpi_x = 96.0
-        if dpi_y == 0: dpi_y = 96.0
-    else:
-        dpi_x = dpi_y = 96.0
+        dx, dy = float(dpi_info[0]), float(dpi_info[1])
+        if dx > 1 and dy > 1:
+            dpi_x, dpi_y = dx, dy
 
     px_w, px_h = im.size  # pixels
 

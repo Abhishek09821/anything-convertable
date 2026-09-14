@@ -46,7 +46,14 @@ export async function convertFile(
   const blob = await r.blob();
   const cd = r.headers.get("Content-Disposition") ?? "";
   const match = cd.match(/filename="([^"]+)"/);
-  const filename = match?.[1] ?? `converted.${conversionId.split("_").pop()}`;
+  const OUTPUT_EXT: Record<string, string> = {
+    image_to_pdf: "pdf",
+    word_to_pdf: "pdf",
+    pdf_to_word: "docx",
+    ppt_to_pdf: "pdf",
+    pdf_to_ppt: "pptx",
+  };
+  const filename = match?.[1] ?? `converted.${OUTPUT_EXT[conversionId] ?? "file"}`;
   const elapsed = r.headers.get("X-Elapsed-Seconds") ?? "?";
   return { blob, filename, elapsed };
 }

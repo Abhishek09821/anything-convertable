@@ -8,7 +8,7 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [conversionId, setConversionId] = useState('pdf_to_docx');
+  const [conversionId, setConversionId] = useState('pdf_to_word');
 
   const open = () => inputRef.current?.click();
 
@@ -22,7 +22,7 @@ function App() {
       const detectRes = await fetch(`${API}/v1/detect`, { method: 'POST', body: fd1 });
       if (detectRes.ok) {
         const detected = await detectRes.json();
-        const suggested = detected.suggested_conversions?.[0];
+        const suggested = detected.suggested?.[0];
         if (suggested) setConversionId(suggested);
       }
 
@@ -41,7 +41,14 @@ function App() {
       const blob = await convertRes.blob();
       const cd = convertRes.headers.get('Content-Disposition') ?? '';
       const match = cd.match(/filename="([^"]+)"/);
-      const filename = match?.[1] ?? `converted.${conversionId.split('_').pop()}`;
+      const OUTPUT_EXT: Record<string, string> = {
+        image_to_pdf: 'pdf',
+        word_to_pdf: 'pdf',
+        pdf_to_word: 'docx',
+        ppt_to_pdf: 'pdf',
+        pdf_to_ppt: 'pptx',
+      };
+      const filename = match?.[1] ?? `converted.${OUTPUT_EXT[conversionId] ?? 'file'}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -69,7 +76,7 @@ function App() {
         className="select"
         disabled={busy}
       >
-        <option value="pdf_to_docx">PDF → DOCX</option>
+        <option value="pdf_to_word">PDF → Word (.docx)</option>
         <option value="pdf_to_xlsx">PDF → XLSX</option>
         <option value="pdf_to_pptx">PDF → PPTX</option>
         <option value="image_to_docx">Image → DOCX</option>
