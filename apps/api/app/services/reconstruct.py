@@ -82,7 +82,7 @@ def _ocr_to_elements(im: Image.Image) -> list[dict]:
     isolated words.  Returns a list of AEDOM text elements.
     Falls back to word-level if block-level returns nothing useful.
     """
-    import pytesseract  # lazy — only needed here
+    import pytesseract  # type: ignore  # lazy — only needed here
 
     results: list[dict] = []
 
@@ -252,7 +252,7 @@ def reconstruct(data: bytes, name: str, content_type: str) -> tuple[dict, bytes 
     print(f'[reconstruct] name={name} content_type={content_type} bytes={len(data)}')
     if content_type == 'application/pdf' or name.lower().endswith('.pdf'):
         pdf = fitz.open(stream=data, filetype='pdf')
-        pages = [page_from_words(p, i) for i, p in enumerate(pdf)]
+        pages = [page_from_words(pdf[i], i) for i in range(len(pdf))]
         text = ' '.join(e['text'] for pg in pages for e in pg['elements'])
         doc = make_doc(name, 'pdf', classify(name, text), pages)
         total_els = sum(len(p['elements']) for p in pages)

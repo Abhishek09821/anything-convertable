@@ -5,7 +5,9 @@ Accuracy strategy:
 - Open image with Pillow, read exact pixel dimensions and DPI metadata.
 - Set PDF page size to exactly match the image dimensions (no scaling, no cropping).
 - Embed the image at 100% quality using ReportLab's ImageReader.
-- Multi-image support: if multiple files are passed (future), each becomes one page.
+- Handles EXIF rotation so photos from phones are always upright.
+- Multi-frame images (animated GIF) → uses first frame only.
+- Supports PNG, JPEG, WEBP, BMP, TIFF formats.
 - Output is always a valid, print-quality PDF.
 """
 from __future__ import annotations
@@ -19,7 +21,17 @@ from reportlab.pdfgen import canvas as rl_canvas
 
 def convert(data: bytes) -> bytes:
     # Open image — supports JPEG, PNG, WEBP, BMP, TIFF etc.
-    im = Image.open(io.BytesIO(data))
+    try:
+        im = Image.open(io.BytesIO(data))
+    except Exception as exc:
+        raise ValueError(
+            f"Cannot open image: {exc}. "
+            "Supported formats: PNG, JPG, JPEG, WEBP, BMP, TIFF."
+        ) from exc
+
+    # Handle multi-frame images (animated GIF → first frame)
+    if getattr(im, "n_frames", 1) > 1:
+        im.seek(0)
 
     # Normalise rotation from EXIF so the PDF is always upright
     im = _apply_exif_rotation(im)
@@ -40,9 +52,8 @@ def convert(data: bytes) -> bytes:
     pt_w = px_w * 72.0 / dpi_x
     pt_h = px_h * 72.0 / dpi_y
 
-    # Re-encode to JPEG for PDF embedding (lossless PNG also works via BytesIO)
+    # Re-encode for PDF embedding
     img_buf = io.BytesIO()
-    fmt = im.format if im.format in ("JPEG", "PNG") else "PNG"
     # Always use PNG for images with transparency, JPEG otherwise
     has_alpha = im.mode in ("RGBA", "LA", "PA")
     if has_alpha:

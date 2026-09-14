@@ -9,6 +9,8 @@ class Settings(BaseModel):
         "http://localhost:5173",
     ]
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "100"))
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    vision_model: str = os.getenv("VISION_MODEL", "gpt-4o")
 
 
 settings = Settings()

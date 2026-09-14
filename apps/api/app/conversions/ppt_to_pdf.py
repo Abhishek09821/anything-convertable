@@ -1,10 +1,11 @@
 """
 PowerPoint (PPTX) → PDF
 
-Accuracy strategy:
-- Render each slide to a high-resolution PNG using python-pptx + Pillow canvas.
-  python-pptx exposes every shape's geometry and text, so we draw it ourselves
-  at any resolution — no LibreOffice needed.
+Accuracy strategy (iLovePDF-grade):
+- Render each slide to a high-resolution PNG (200 DPI) using python-pptx + Pillow.
+- Use proper TrueType font rendering (Noto Sans / Arial Unicode) instead of
+  PIL's default bitmap font — text is sharp and correctly sized.
+- Hindi / Devanagari text is fully supported via Unicode TTF fonts.
 - Slide background fill (solid colour or gradient) is rendered correctly.
 - All text shapes: font, size, bold, italic, colour, alignment, word wrap.
 - Images embedded in the presentation are drawn at their exact position/size.
@@ -16,19 +17,18 @@ Accuracy strategy:
 from __future__ import annotations
 
 import io
-import math
 
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
-from pptx.dml.color import RGBColor as PptxRGB
 from pptx.enum.text import PP_ALIGN
-from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as rl_canvas
 
+from .fonts import get_pil_font
+
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-RENDER_DPI = 150          # resolution for slide → PNG rendering
+RENDER_DPI = 200          # resolution for slide → PNG rendering (up from 150)
 PT_PER_EMU = 1 / 12700.0
 PX_PER_PT  = RENDER_DPI / 72.0
 
@@ -69,9 +69,47 @@ def _pt_to_px(pt_val: float) -> float:
     return pt_val * PX_PER_PT
 
 
+def _get_font(size_pt: float, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Get a TrueType font at the given point size, with Unicode support."""
+    size_px = max(8, int(_pt_to_px(size_pt)))
+    return get_pil_font(size_px)
+
+
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> float:
+    """Measure text width using the font."""
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0]
+    except Exception:
+        return len(text) * 8
+
+
+def _word_wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: float) -> list[str]:
+    """Word-wrap text to fit within max_width pixels."""
+    words = text.split()
+    if not words:
+        return []
+
+    lines = []
+    current = ""
+    for word in words:
+        test = (current + " " + word).strip()
+        tw = _text_width(draw, test, font)
+        if tw <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 def _draw_text_frame(draw: ImageDraw.ImageDraw, tf, x_px, y_px, w_px, h_px):
     """Draw all paragraphs from a text frame into the PIL image."""
     cursor_y = y_px + _pt_to_px(4)  # small top padding
+    padding_x = _pt_to_px(6)
 
     for para in tf.paragraphs:
         if cursor_y > y_px + h_px:
@@ -98,7 +136,15 @@ def _draw_text_frame(draw: ImageDraw.ImageDraw, tf, x_px, y_px, w_px, h_px):
         except Exception:
             pass
 
+        is_bold = False
+        try:
+            is_bold = bool(run.font.bold)
+        except Exception:
+            pass
+
+        font = _get_font(font_size_pt, is_bold)
         font_size_px = max(8, int(_pt_to_px(font_size_pt)))
+        line_height = font_size_px * 1.3
 
         # Text colour
         txt_color = (30, 30, 30)
@@ -109,49 +155,28 @@ def _draw_text_frame(draw: ImageDraw.ImageDraw, tf, x_px, y_px, w_px, h_px):
         except Exception:
             pass
 
-        # Load a font (PIL default — metric-approximate but fast)
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
-
         # Alignment
         al = para.alignment
-        if al == PP_ALIGN.CENTER:
-            anchor = "mm"
-            x = x_px + w_px / 2
-        elif al == PP_ALIGN.RIGHT:
-            anchor = "rm"
-            x = x_px + w_px - _pt_to_px(4)
-        else:
-            anchor = "lm"
-            x = x_px + _pt_to_px(4)
+        usable_w = w_px - 2 * padding_x
 
-        # Simple word-wrap: split into lines that fit width
-        words = line_text.split()
-        lines_out = []
-        current = ""
-        for word in words:
-            test = (current + " " + word).strip()
-            try:
-                bbox = draw.textbbox((0, 0), test, font=font)
-                tw = bbox[2] - bbox[0]
-            except Exception:
-                tw = len(test) * font_size_px * 0.6
-            if tw <= w_px - _pt_to_px(8):
-                current = test
-            else:
-                if current:
-                    lines_out.append(current)
-                current = word
-        if current:
-            lines_out.append(current)
+        # Word-wrap using actual font metrics
+        wrapped_lines = _word_wrap(draw, line_text, font, usable_w)
 
-        for line in lines_out:
+        for line in wrapped_lines:
             if cursor_y > y_px + h_px:
                 break
+
+            # Calculate x position based on alignment
+            line_w = _text_width(draw, line, font)
+            if al == PP_ALIGN.CENTER:
+                x = x_px + padding_x + (usable_w - line_w) / 2
+            elif al == PP_ALIGN.RIGHT:
+                x = x_px + padding_x + usable_w - line_w
+            else:
+                x = x_px + padding_x
+
             draw.text((x, cursor_y), line, fill=txt_color, font=font)
-            cursor_y += font_size_px * 1.3
+            cursor_y += line_height
 
 
 # ── Shape rendering ────────────────────────────────────────────────────────────
@@ -195,7 +220,7 @@ def _render_slide(slide, slide_w_emu: int, slide_h_emu: int) -> Image.Image:
                 try:
                     img_blob = shape.image.blob
                     pil_img = Image.open(io.BytesIO(img_blob)).convert("RGBA")
-                    pil_img = pil_img.resize((max(1, w), max(1, h)), Image.LANCZOS)
+                    pil_img = pil_img.resize((max(1, w), max(1, h)), Image.Resampling.LANCZOS)
                     # Composite onto background
                     if pil_img.mode == "RGBA":
                         bg = Image.new("RGBA", im.size, (255, 255, 255, 0))
@@ -215,6 +240,7 @@ def _render_slide(slide, slide_w_emu: int, slide_h_emu: int) -> Image.Image:
                 if nr > 0 and nc > 0:
                     cw = w // nc
                     rh = h // nr
+                    cell_font = _get_font(10)
                     for ri, row in enumerate(tbl.rows):
                         for ci, cell in enumerate(row.cells):
                             cx = left + ci * cw
@@ -228,7 +254,13 @@ def _render_slide(slide, slide_w_emu: int, slide_h_emu: int) -> Image.Image:
                             draw.rectangle([cx, cy, cx + cw, cy + rh], fill=cell_bg, outline=(180, 180, 180))
                             txt_col = (255, 255, 255) if ri == 0 else (30, 30, 30)
                             cell_text = cell.text_frame.text if cell.has_text_frame else ""
-                            draw.text((cx + 4, cy + 4), cell_text[:40], fill=txt_col)
+                            if cell_text:
+                                # Word-wrap cell text
+                                cell_lines = _word_wrap(draw, cell_text, cell_font, cw - 8)
+                                cy_text = cy + 4
+                                for cl in cell_lines[:3]:  # max 3 lines per cell
+                                    draw.text((cx + 4, cy_text), cl, fill=txt_col, font=cell_font)
+                                    cy_text += int(_pt_to_px(12))
 
             # ── Text frame ────────────────────────────────────────────────────
             if shape.has_text_frame and shape.shape_type != 13:
@@ -245,18 +277,18 @@ def _render_slide(slide, slide_w_emu: int, slide_h_emu: int) -> Image.Image:
 def convert(data: bytes) -> bytes:
     prs = Presentation(io.BytesIO(data))
 
-    slide_w = prs.slide_width  # EMU
-    slide_h = prs.slide_height
+    slide_w_emu = int(prs.slide_width) if prs.slide_width is not None else 9144000
+    slide_h_emu = int(prs.slide_height) if prs.slide_height is not None else 6858000
 
     out_buf = io.BytesIO()
     # PDF page dimensions in points
-    pt_w = slide_w * PT_PER_EMU
-    pt_h = slide_h * PT_PER_EMU
+    pt_w = slide_w_emu * PT_PER_EMU
+    pt_h = slide_h_emu * PT_PER_EMU
 
     c = rl_canvas.Canvas(out_buf, pagesize=(pt_w, pt_h))
 
     for slide in prs.slides:
-        slide_img = _render_slide(slide, int(slide_w), int(slide_h))
+        slide_img = _render_slide(slide, slide_w_emu, slide_h_emu)
 
         # Embed slide PNG into PDF page
         img_buf = io.BytesIO()

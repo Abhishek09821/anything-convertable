@@ -1,4 +1,4 @@
-import base64, json, os
+import base64, json
 from typing import Any
 import httpx
 from ..core.config import settings

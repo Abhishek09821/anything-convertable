@@ -1,7 +1,7 @@
 """
 Word (DOCX) → PDF
 
-Accuracy strategy:
+Accuracy strategy (iLovePDF-grade):
 - Parse the DOCX with python-docx to extract every paragraph and table.
 - Render to PDF with ReportLab, preserving:
     • Heading levels (font size + bold)
@@ -12,6 +12,7 @@ Accuracy strategy:
     • Inline images (extracted from DOCX zip, embedded in PDF)
     • Page size from the document's section (A4 default)
     • Margins from the document's section
+- Hindi / Devanagari text is fully supported via a registered Unicode TTF font.
 - No external tools (no LibreOffice, no subprocess).
 - Typical 10-page document converts in < 3 seconds.
 """
@@ -20,21 +21,16 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from typing import Any
 
 from docx import Document
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
 from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch, mm
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     BaseDocTemplate,
-    FrameBreak,
     Image as RLImage,
     PageBreak,
     PageTemplate,
@@ -43,9 +39,12 @@ from reportlab.platypus import (
     Table,
     TableStyle,
     Frame,
-    KeepTogether,
 )
-from reportlab.platypus.flowables import HRFlowable
+
+from .fonts import (
+    has_non_latin,
+    register_reportlab_unicode_font,
+)
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -75,7 +74,25 @@ def _align(word_align: str | None) -> int:
     return TA_LEFT
 
 
-def _run_xml_to_html(run) -> str:
+def _escape_html(text: str) -> str:
+    """Escape text for ReportLab Paragraph HTML."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _choose_font(text: str, base_font: str, base_bold: str,
+                  unicode_font: str, unicode_bold: str,
+                  want_bold: bool = False) -> str:
+    """Pick the right font based on text content."""
+    if has_non_latin(text):
+        return unicode_bold if want_bold else unicode_font
+    return base_bold if want_bold else base_font
+
+
+def _run_xml_to_html(run, unicode_font: str, unicode_bold: str) -> str:
     """Convert a python-docx Run to an HTML fragment for ReportLab Paragraph."""
     rpr = run._r.find(qn("w:rPr"))
     bold = run.bold
@@ -88,9 +105,12 @@ def _run_xml_to_html(run) -> str:
         if color_el is not None:
             color_val = color_el.get(qn("w:val"))
 
-    text = run.text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = _escape_html(run.text)
     if not text:
         return ""
+
+    # If text has non-Latin chars, wrap with the Unicode font
+    needs_unicode = has_non_latin(run.text)
 
     tag_open = ""
     tag_close = ""
@@ -111,6 +131,12 @@ def _run_xml_to_html(run) -> str:
     if font_size:
         size_pt = round(_emu_to_pt(font_size), 1)
         tag_open = f'<font size="{size_pt}">' + tag_open
+        tag_close = tag_close + "</font>"
+
+    # Apply Unicode font face for non-Latin text
+    if needs_unicode and unicode_font != "Helvetica":
+        font_name = unicode_bold if bold else unicode_font
+        tag_open = f'<font face="{font_name}">' + tag_open
         tag_close = tag_close + "</font>"
 
     return tag_open + text + tag_close
@@ -148,7 +174,8 @@ def _extract_images(docx_bytes: bytes) -> dict[str, bytes]:
 # ── paragraph → ReportLab flowable ────────────────────────────────────────────
 
 def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
-                      base_font_size: float, images: dict[str, bytes]) -> list:
+                      base_font_size: float, images: dict[str, bytes],
+                      unicode_font: str, unicode_bold: str) -> list:
     """Convert one python-docx Paragraph to a list of ReportLab flowables."""
     # Check for inline images
     for inline in para._p.iter(qn("a:blip")):
@@ -167,9 +194,12 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
 
     # Build HTML fragment from runs
     html_parts = []
+    full_text_parts = []
     for run in para.runs:
-        html_parts.append(_run_xml_to_html(run))
+        html_parts.append(_run_xml_to_html(run, unicode_font, unicode_bold))
+        full_text_parts.append(run.text)
     html_text = "".join(html_parts).strip()
+    full_text = "".join(full_text_parts)
     if not html_text:
         return [Spacer(1, 4)]
 
@@ -212,13 +242,18 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
 
     align = _align(str(para.alignment) if para.alignment else None)
 
-    font_name = "Helvetica-Bold" if bold_default else "Helvetica"
-    if para.runs:
-        fn = (para.runs[0].font.name or "").lower()
-        if any(x in fn for x in ["times", "georgia", "garamond", "serif"]):
-            font_name = "Times-Bold" if bold_default else "Times-Roman"
-        elif any(x in fn for x in ["courier", "mono", "consolas"]):
-            font_name = "Courier-Bold" if bold_default else "Courier"
+    # Choose font — use Unicode font for non-Latin text
+    needs_unicode = has_non_latin(full_text)
+    if needs_unicode:
+        font_name = unicode_bold if bold_default else unicode_font
+    else:
+        font_name = "Helvetica-Bold" if bold_default else "Helvetica"
+        if para.runs:
+            fn = (para.runs[0].font.name or "").lower()
+            if any(x in fn for x in ["times", "georgia", "garamond", "serif"]):
+                font_name = "Times-Bold" if bold_default else "Times-Roman"
+            elif any(x in fn for x in ["courier", "mono", "consolas"]):
+                font_name = "Courier-Bold" if bold_default else "Courier"
 
     if bold_default and html_text and not html_text.startswith("<b>"):
         html_text = f"<b>{html_text}</b>"
@@ -230,7 +265,7 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
         leading=leading or (font_size * 1.25),
         spaceBefore=space_before,
         spaceAfter=space_after,
-        alignment=align,
+        alignment=align,  # type: ignore[arg-type]
         wordWrap="CJK",
     )
     try:
@@ -244,7 +279,8 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
 # ── table → ReportLab Table ───────────────────────────────────────────────────
 
 def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
-                       base_font_size: float) -> list:
+                       base_font_size: float,
+                       unicode_font: str, unicode_bold: str) -> list:
     avail = page_width_pt - 2 * margin_pt
     rows = tbl.rows
     if not rows:
@@ -257,19 +293,25 @@ def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
     for ri, row in enumerate(rows):
         row_data = []
         for cell in row.cells:
-            text = " ".join(p.text for p in cell.paragraphs).strip()
+            raw_text = " ".join(p.text for p in cell.paragraphs).strip()
+            escaped_text = _escape_html(raw_text)
             is_bold = ri == 0  # header row
+            needs_unicode = has_non_latin(raw_text)
+            if needs_unicode:
+                cell_font = unicode_bold if is_bold else unicode_font
+            else:
+                cell_font = "Helvetica-Bold" if is_bold else "Helvetica"
             ps = ParagraphStyle(
                 name="cell",
-                fontName="Helvetica-Bold" if is_bold else "Helvetica",
+                fontName=cell_font,
                 fontSize=base_font_size - 1,
                 leading=(base_font_size - 1) * 1.2,
                 wordWrap="CJK",
             )
             try:
-                row_data.append(Paragraph(text, ps))
+                row_data.append(Paragraph(escaped_text, ps))
             except Exception:
-                row_data.append(Paragraph(text.replace("&", "&amp;"), ps))
+                row_data.append(Paragraph(escaped_text, ps))
         # Pad to n_cols
         while len(row_data) < n_cols:
             row_data.append(Paragraph("", ParagraphStyle("empty", fontSize=base_font_size - 1)))
@@ -296,6 +338,9 @@ def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def convert(data: bytes) -> bytes:
+    # Register Unicode font for Hindi/Devanagari support
+    unicode_font, unicode_bold = register_reportlab_unicode_font()
+
     doc = Document(io.BytesIO(data))
     images = _extract_images(data)
 
@@ -312,8 +357,9 @@ def convert(data: bytes) -> bytes:
     base_font_size = 11.0
     try:
         normal_style = doc.styles["Normal"]
-        if normal_style.font.size:
-            base_font_size = round(_emu_to_pt(normal_style.font.size), 1)
+        font = getattr(normal_style, "font", None)
+        if font and getattr(font, "size", None):
+            base_font_size = round(_emu_to_pt(font.size), 1)
     except Exception:
         pass
 
@@ -328,12 +374,16 @@ def convert(data: bytes) -> bytes:
             from docx.text.paragraph import Paragraph as DocxPara
             para = DocxPara(block, doc)
             story.extend(_para_to_flowable(
-                para, page_w, margin_left, base_font_size, images
+                para, page_w, margin_left, base_font_size, images,
+                unicode_font, unicode_bold,
             ))
         elif tag == "tbl":
             from docx.table import Table as DocxTable
             tbl = DocxTable(block, doc)
-            story.extend(_table_to_flowable(tbl, page_w, margin_left, base_font_size))
+            story.extend(_table_to_flowable(
+                tbl, page_w, margin_left, base_font_size,
+                unicode_font, unicode_bold,
+            ))
         elif tag == "sectPr":
             # Section break → page break (except last)
             if block != doc.element.body[-1]:

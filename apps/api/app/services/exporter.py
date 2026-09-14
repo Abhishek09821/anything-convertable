@@ -5,7 +5,6 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.utils import ImageReader
 from docx import Document
 from docx.shared import Pt, Inches
-from PIL import Image as PILImage
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -117,8 +116,6 @@ def to_docx(doc: dict) -> tuple[bytes, str]:
                 if raw:
                     try:
                         # Scale to fit within page width (6 inches)
-                        img = PILImage.open(io.BytesIO(raw))
-                        aspect = img.height / img.width if img.width else 1
                         w_in = min(6.0, e['bounds']['width'] / 96)
                         d.add_picture(io.BytesIO(raw), width=Inches(w_in))
                     except Exception as exc:
