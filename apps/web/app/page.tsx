@@ -1,920 +1,149 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Download,
-  FileText,
-  Loader2,
-  RefreshCw,
-  Shield,
-  Sparkles,
-  Trash2,
-  Type,
-  UploadCloud,
-} from "lucide-react";
-import {
-  ConversionInfo,
-  FORMAT_ICON,
-  convertFile,
-  convertText,
-  detectFile,
-  listConversions,
-} from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, ChevronRight, File, FileImage, FileText, Files, Image as ImageIcon, Info, Loader2, Presentation, RefreshCw, SlidersHorizontal, Type, Upload, X } from "lucide-react";
+import { ConversionInfo, DownloadResult, convertFile, convertText, detectFile, listConversions } from "../lib/api";
 
-// ── types ─────────────────────────────────────────────────────────────────────
+const TOOLS = [
+  { id: "image_to_pdf", title: "Image to PDF", description: "Keep every detail in your images.", formats: "JPG, PNG, WEBP, TIFF + more", icon: ImageIcon, ext: "PDF" },
+  { id: "word_to_pdf", title: "Word to PDF", description: "Make your document ready to share.", formats: "DOCX", icon: FileText, ext: "PDF" },
+  { id: "pdf_to_word", title: "PDF to Word", description: "Turn your PDF into an editable document.", formats: "PDF", icon: FileText, ext: "DOCX" },
+  { id: "ppt_to_pdf", title: "PowerPoint to PDF", description: "Bring your slides into one document.", formats: "PPTX", icon: Presentation, ext: "PDF" },
+  { id: "pdf_to_ppt", title: "PDF to PowerPoint", description: "Give your document a place to present.", formats: "PDF", icon: Presentation, ext: "PPTX" },
+];
+const FONTS = ["Arial", "Calibri", "Times New Roman", "Georgia"];
+const ACCEPT = ".pdf,.docx,.pptx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif";
 type Stage = "idle" | "detecting" | "ready" | "converting" | "done" | "error";
-type ActiveTab = "file" | "text";
-
-interface Result {
-  blob: Blob;
-  filename: string;
-  elapsed: string;
-  label: string;
+type Result = DownloadResult & { label: string };
+function save(result: DownloadResult) {
+  const url = URL.createObjectURL(result.blob);
+  const link = document.createElement("a"); link.href = url; link.download = result.filename;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+function size(bytes: number) { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1024).toFixed(1)} KB`; }
 
-// ── Tile configurations for file conversions ──────────────────────────────────
-const TILES = [
-  {
-    id: "image_to_pdf",
-    icon: "🖼️",
-    arrow: "📕",
-    title: "Image → PDF",
-    subtitle: "PNG · JPG · JPEG",
-    accepts: ".png,.jpg,.jpeg",
-  },
-  {
-    id: "word_to_pdf",
-    icon: "📝",
-    arrow: "📕",
-    title: "Word → PDF",
-    subtitle: "DOCX → PDF",
-    accepts: ".docx",
-  },
-  {
-    id: "pdf_to_word",
-    icon: "📕",
-    arrow: "📝",
-    title: "PDF → Word",
-    subtitle: "PDF → DOCX",
-    accepts: ".pdf",
-  },
-  {
-    id: "ppt_to_pdf",
-    icon: "📽️",
-    arrow: "📕",
-    title: "PowerPoint → PDF",
-    subtitle: "PPTX → PDF",
-    accepts: ".pptx",
-  },
-  {
-    id: "pdf_to_ppt",
-    icon: "📕",
-    arrow: "📽️",
-    title: "PDF → PowerPoint",
-    subtitle: "PDF → PPTX",
-    accepts: ".pdf",
-  },
-];
-
-// ── Font options with descriptions ───────────────────────────────────────────
-const FILE_FONT_OPTIONS = [
-  { id: "original", label: "Keep Original Font (Recommended)", description: "Preserve exact detected document fonts" },
-  { id: "Times New Roman", label: "Times New Roman", description: "Classic academic & formal serif" },
-  { id: "Arial", label: "Arial", description: "Clean, ultra-legible modern sans-serif" },
-  { id: "Calibri", label: "Calibri", description: "Standard Microsoft Office typeface" },
-  { id: "Georgia", label: "Georgia", description: "High-contrast elegant editorial serif" },
-];
-
-const TYPED_FONT_OPTIONS = [
-  { id: "Calibri", label: "Calibri", description: "Modern & balanced standard font" },
-  { id: "Times New Roman", label: "Times New Roman", description: "Formal, academic & legal standard" },
-  { id: "Arial", label: "Arial", description: "Clean, crisp sans-serif" },
-  { id: "Georgia", label: "Georgia", description: "High-legibility elegant book serif" },
-];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-const SAMPLE_TEXT = `Anything Convertable — High Accuracy Document Engine
-==================================================
-
-Welcome to the highest-fidelity document conversion suite!
-This system features TrueType font resolution, ligature-preserving Hindi & multilingual Devanagari text processing, and crystal-clear vector or raster PDF output.
-
-हिंदी और बहुभाषी समर्थन (Hindi & Multilingual Support):
-- नमस्ते भारत! यह एक उच्च गुणवत्ता वाला दस्तावेज़ रूपांतरण है।
-- सटीक फ़ॉन्ट रूपांतरण (Devanagari matras, ligatures & complex scripts).
-- गणित और प्रतीक: E = mc², π ≈ 3.14159, ₹ 99,999.00
-
-Features Tested:
-1. Searchable Vector PDF vs. 300 DPI Flat Non-Searchable Raster.
-2. Direct typography binding (Times New Roman, Arial, Calibri, Georgia).
-3. 100% native Word (.docx) and PowerPoint (.pptx) styling.`;
-
-// ── Main Page Component ──────────────────────────────────────────────────────
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("file");
-
-  // File conversion state
-  const [stage, setStage]               = useState<Stage>("idle");
-  const [error, setError]               = useState("");
-  const [file, setFile]                 = useState<File | null>(null);
-  const [convId, setConvId]             = useState<string | null>(null);
-  const [selectedFont, setSelectedFont] = useState<string>("original");
-  const [searchablePdf, setSearchablePdf] = useState<boolean>(true);
-  const [available, setAvailable]       = useState<ConversionInfo[]>([]);
-  const [result, setResult]             = useState<Result | null>(null);
-  const [history, setHistory]           = useState<Result[]>([]);
-  const [allConversions, setAllConversions] = useState<ConversionInfo[]>([]);
-
-  // Typed text converter state
-  const [typedText, setTypedText]           = useState("");
-  const [typedFormat, setTypedFormat]       = useState<"docx" | "pdf">("docx");
-  const [typedFont, setTypedFont]           = useState("Calibri");
-  const [typedFontSize, setTypedFontSize]   = useState(12);
-  const [typedSearchable, setTypedSearchable] = useState(true);
-  const [textStage, setTextStage]           = useState<"idle" | "converting" | "done" | "error">("idle");
-  const [textError, setTextError]           = useState("");
-  const [textResult, setTextResult]         = useState<Result | null>(null);
-
-  // Hidden file picker references
-  const hiddenInput = useRef<HTMLInputElement>(null);
-  const dropInput   = useRef<HTMLInputElement>(null);
-  const [pendingTileId, setPendingTileId] = useState<string | null>(null);
-  const [pendingAccepts, setPendingAccepts] = useState("");
-
-  // Load conversions once on mount
-  useEffect(() => {
-    listConversions().then(setAllConversions).catch(() => {});
-  }, []);
-
-  const convMap = Object.fromEntries(allConversions.map((c) => [c.id, c]));
-
-  // ── Tile clicked in File mode ────────────────────────────────────────────────
-  const onTileClick = (id: string, accepts: string) => {
-    setPendingTileId(id);
-    setPendingAccepts(accepts);
-    setTimeout(() => hiddenInput.current?.click(), 0);
-  };
-
-  const onTileFile = useCallback(
-    async (f: File) => {
-      if (!pendingTileId) return;
-      setFile(f);
-      setConvId(pendingTileId);
-      setSelectedFont("original");
-      setSearchablePdf(true);
-      setError("");
-      setResult(null);
-      const match = allConversions.find((c) => c.id === pendingTileId);
-      setAvailable(match ? [match] : []);
-      setStage("ready");
-    },
-    [pendingTileId, allConversions],
-  );
-
-  // ── Drag and drop file ───────────────────────────────────────────────────────
-  const handleDropFile = useCallback(async (f: File) => {
-    setFile(f);
-    setConvId(null);
-    setError("");
-    setResult(null);
-    setAvailable([]);
-    setSelectedFont("original");
-    setSearchablePdf(true);
-    setStage("detecting");
-    try {
-      const d = await detectFile(f);
-      if (d.all_conversions.length === 0) {
-        throw new Error(
-          `No converter supports "${f.name}". ` +
-            "Accepted formats: PNG, JPG, JPEG, PDF, DOCX, PPTX.",
-        );
-      }
-      setAvailable(d.all_conversions);
-      setConvId(d.suggested[0] ?? d.all_conversions[0].id);
-      setStage("ready");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Detection failed");
-      setStage("error");
-    }
-  }, []);
-
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const f = e.dataTransfer.files?.[0];
-      if (f) handleDropFile(f);
-    },
-    [handleDropFile],
-  );
-
-  // ── Execute File Conversion ──────────────────────────────────────────────────
-  const runConversion = useCallback(async () => {
-    if (!file || !convId) return;
-    setStage("converting");
-    setError("");
-    try {
-      const { blob, filename, elapsed } = await convertFile(
-        file,
-        convId,
-        selectedFont,
-        searchablePdf,
-      );
-      const r: Result = {
-        blob,
-        filename,
-        elapsed,
-        label: convMap[convId]?.label ?? convId,
-      };
-      setResult(r);
-      setHistory((h) => [r, ...h].slice(0, 8));
-      setStage("done");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Conversion failed");
-      setStage("error");
-    }
-  }, [file, convId, convMap, selectedFont, searchablePdf]);
-
-  const resetFileMode = () => {
-    setStage("idle");
-    setFile(null);
-    setConvId(null);
-    setAvailable([]);
-    setResult(null);
-    setError("");
-  };
-
-  // ── Execute Live Typed Text Conversion ──────────────────────────────────────
-  const runTextConversion = async () => {
-    if (!typedText.trim()) {
-      setTextError("Please enter some text before converting.");
-      return;
-    }
-    setTextStage("converting");
-    setTextError("");
-    try {
-      const { blob, filename, elapsed } = await convertText({
-        text: typedText,
-        to_format: typedFormat,
-        font: typedFont,
-        font_size: typedFontSize,
-        searchable: typedSearchable,
-      });
-      const r: Result = {
-        blob,
-        filename,
-        elapsed,
-        label: `Text → ${typedFormat.toUpperCase()}`,
-      };
-      setTextResult(r);
-      setHistory((h) => [r, ...h].slice(0, 8));
-      setTextStage("done");
-    } catch (e) {
-      setTextError(e instanceof Error ? e.message : "Text conversion failed");
-      setTextStage("error");
-    }
-  };
-
+  const [tab, setTab] = useState<"files" | "text">("files");
+  const [stage, setStage] = useState<Stage>("idle");
+  const [catalog, setCatalog] = useState<ConversionInfo[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [selected, setSelected] = useState("image_to_pdf");
+  const [available, setAvailable] = useState<string[]>([]);
+  const [font, setFont] = useState("original");
+  const [searchable, setSearchable] = useState(true);
+  const [fidelity, setFidelity] = useState("appearance");
+  const [error, setError] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const [result, setResult] = useState<Result | null>(null);
+  const [history, setHistory] = useState<Result[]>([]);
+  const [text, setText] = useState("");
+  const [format, setFormat] = useState<"docx" | "pdf">("docx");
+  const [textFont, setTextFont] = useState("Arial");
+  const [fontSize, setFontSize] = useState(12);
+  const [textBusy, setTextBusy] = useState(false);
+  const [textError, setTextError] = useState("");
+  const [textResult, setTextResult] = useState<Result | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const request = useRef(0);
   const busy = stage === "detecting" || stage === "converting";
-  const activeConv = convId ? convMap[convId] : null;
-  const isPdfOutput = activeConv?.output_ext === "pdf" || activeConv?.id?.endsWith("_to_pdf");
+  const tool = TOOLS.find(t => t.id === selected)!;
+  const metadata = catalog.find(c => c.id === selected);
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const loadCatalog = () => { setCatalogError(""); listConversions().then(setCatalog).catch(() => setCatalogError("The conversion service is unavailable. Please try again.")); };
+  useEffect(() => { loadCatalog(); }, []);
 
-  // Word & character counts for typed text
-  const charCount = typedText.length;
-  const wordCount = typedText.trim() ? typedText.trim().split(/\s+/).length : 0;
-
-  return (
-    <div className="min-h-screen flex flex-col bg-slate-50/50">
-      {/* ── Nav Header ── */}
-      <header className="bg-white border-b px-6 py-4 flex items-center gap-3 sticky top-0 z-30 shadow-xs">
-        <div className="w-8 h-8 rounded-lg bg-black text-white grid place-items-center font-bold text-sm select-none">
-          AC
-        </div>
-        <div>
-          <span className="font-bold text-[15px] block leading-tight">Anything Convertable</span>
-          <span className="text-[11px] text-slate-400 font-medium">Highest Accuracy · TrueType Fonts · Searchable / Flat PDF</span>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium hidden sm:inline-block">
-            5 File Converters · Text Studio Active
-          </span>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-8 space-y-7">
-        {/* ── Hero ── */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold mb-1">
-            <Sparkles size={13} /> Studio-Grade Document Conversion
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight text-slate-900">
-            High Accuracy Document Converter
-          </h1>
-          <p className="text-slate-500 text-sm max-w-lg mx-auto">
-            Upload files or type directly to convert between Word, PDF, PPTX, and Images with perfect font rendering &amp; Hindi Unicode support.
-          </p>
-        </div>
-
-        {/* ── Mode Tabs Switcher ── */}
-        <div className="flex bg-slate-200/80 p-1 rounded-xl max-w-md mx-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTab("file")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-              activeTab === "file"
-                ? "bg-white text-black shadow-xs"
-                : "text-slate-600 hover:text-black"
-            }`}
-          >
-            <UploadCloud size={16} /> File Converter
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("text")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-              activeTab === "text"
-                ? "bg-white text-black shadow-xs"
-                : "text-slate-600 hover:text-black"
-            }`}
-          >
-            <Type size={16} /> Type to Word / PDF
-          </button>
-        </div>
-
-        {/* ═══════════════════════════════════════════════════════════════════════
-            TAB 1: FILE CONVERTER
-           ═══════════════════════════════════════════════════════════════════════ */}
-        {activeTab === "file" && (
-          <div className="space-y-6">
-            {/* ── 7 conversion tiles ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {TILES.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => onTileClick(t.id, t.accepts)}
-                  disabled={busy}
-                  className="group bg-white border border-slate-200 rounded-xl p-4 text-left
-                             hover:border-black hover:shadow-sm transition-all disabled:opacity-40
-                             active:scale-[0.99]"
-                >
-                  <div className="flex items-center gap-2 text-xl mb-2">
-                    <span>{t.icon}</span>
-                    <ArrowRight size={14} className="text-slate-300 group-hover:text-black transition-colors" />
-                    <span>{t.arrow}</span>
-                  </div>
-                  <p className="font-semibold text-xs sm:text-sm text-slate-800">{t.title}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{t.subtitle}</p>
-                </button>
-              ))}
-            </div>
-
-            {/* ── Hidden file picker for tiles ── */}
-            <input
-              ref={hiddenInput}
-              type="file"
-              hidden
-              accept={pendingAccepts}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onTileFile(f);
-                e.target.value = "";
-              }}
-            />
-
-            {/* ── Drop zone (auto-detect) ── */}
-            {stage === "idle" && (
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={onDrop}
-                onClick={() => dropInput.current?.click()}
-                className="border-2 border-dashed border-slate-300 hover:border-slate-500
-                           rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer
-                           transition-colors bg-white shadow-2xs"
-              >
-                <UploadCloud size={34} className="text-slate-400" />
-                <div className="text-center">
-                  <p className="font-semibold text-sm text-slate-800">Drag &amp; drop any file here, or click to browse</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    PNG · JPG · JPEG · PDF · DOCX · PPTX — up to 100 MB
-                  </p>
-                </div>
-                <input
-                  ref={dropInput}
-                  type="file"
-                  hidden
-                  accept=".png,.jpg,.jpeg,.pdf,.docx,.pptx"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleDropFile(f);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-            )}
-
-            {/* ── Detecting / Converting spinner ── */}
-            {(stage === "detecting" || stage === "converting") && (
-              <div className="bg-white rounded-2xl border p-8 flex flex-col items-center gap-4 shadow-xs">
-                <Loader2 size={32} className="animate-spin text-slate-700" />
-                <div className="text-center">
-                  <p className="font-semibold text-sm text-slate-800">
-                    {stage === "detecting" ? "Detecting file format…" : "Converting document with maximum accuracy…"}
-                  </p>
-                  {stage === "converting" && file && (
-                    <p className="text-xs text-slate-400 mt-1">{file.name}</p>
-                  )}
-                  <p className="text-xs text-slate-400 mt-1">
-                    {stage === "converting"
-                      ? "Resolving TrueType fonts, high-res images & layout structure…"
-                      : "Inspecting magic bytes…"}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* ── Ready state: options picker & convert ── */}
-            {stage === "ready" && file && available.length > 0 && (
-              <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-                {/* File summary header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b bg-slate-50">
-                  <div className="w-8 h-8 rounded-lg bg-slate-200 grid place-items-center text-lg shrink-0">
-                    {FORMAT_ICON[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? "📄"}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate text-slate-800">{file.name}</p>
-                    <p className="text-xs text-slate-400">
-                      {(file.size / 1024).toFixed(0)} KB
-                    </p>
-                  </div>
-                  <button
-                    onClick={resetFileMode}
-                    className="ml-auto text-xs text-slate-500 hover:text-black flex items-center gap-1 font-medium"
-                  >
-                    <RefreshCw size={13} /> Change File
-                  </button>
-                </div>
-
-                <div className="p-5 space-y-4">
-                  {/* Output format picker */}
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2.5">
-                      Target Conversion
-                    </p>
-                    <div className="space-y-2">
-                      {available.map((c) => (
-                        <button
-                          key={c.id}
-                          onClick={() => setConvId(c.id)}
-                          className={`w-full text-left flex items-center gap-3 px-4 py-3
-                            rounded-xl border transition-all
-                            ${convId === c.id
-                              ? "border-black bg-slate-950 text-white shadow-xs"
-                              : "border-slate-200 hover:border-slate-400 bg-white text-slate-800"
-                            }`}
-                        >
-                          <span className="text-xl shrink-0">
-                            {FORMAT_ICON[c.output_ext] ?? "📄"}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className={`font-semibold text-sm ${convId === c.id ? "text-white" : "text-slate-900"}`}>
-                              {c.label}
-                            </p>
-                            <p className={`text-xs mt-0.5 ${convId === c.id ? "text-slate-300" : "text-slate-500"}`}>
-                              {c.description}
-                            </p>
-                          </div>
-                          {convId === c.id && (
-                            <CheckCircle2 size={18} className="text-white shrink-0" />
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Font Customization (for converters supporting font choices) */}
-                  {(activeConv?.supports_font_choice || convId === "pdf_to_word" || convId === "pdf_to_ppt" || convId === "word_to_pdf" || convId === "ppt_to_pdf") && (
-                    <div className="pt-3 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
-                          <Type size={14} /> Document Font Engine
-                        </label>
-                        <span className="text-[11px] text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-full">
-                          Full Hindi/Devanagari Unicode
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {FILE_FONT_OPTIONS.map((f) => {
-                          const isSelected = selectedFont === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              type="button"
-                              onClick={() => setSelectedFont(f.id)}
-                              className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                                isSelected
-                                  ? "border-black bg-slate-900 text-white shadow-xs"
-                                  : "border-slate-200 hover:border-slate-400 bg-slate-50 text-slate-700"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between w-full">
-                                <span className={`font-semibold text-xs ${isSelected ? "text-white" : "text-slate-900"}`}>
-                                  {f.label}
-                                </span>
-                                {isSelected && <CheckCircle2 size={14} className="text-white shrink-0 ml-1" />}
-                              </div>
-                              <span className={`text-[11px] mt-0.5 ${isSelected ? "text-slate-300" : "text-slate-400"}`}>
-                                {f.description}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Searchable vs Non-Searchable PDF Toggle (if output is PDF) */}
-                  {(isPdfOutput || activeConv?.supports_searchable_option) && (
-                    <div className="pt-3 border-t border-slate-100">
-                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-1.5 mb-2">
-                        <Shield size={14} /> PDF Text &amp; Security Mode
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSearchablePdf(true)}
-                          className={`p-3 rounded-xl border text-left transition-all ${
-                            searchablePdf
-                              ? "border-black bg-slate-900 text-white shadow-xs"
-                              : "border-slate-200 hover:border-slate-400 bg-slate-50 text-slate-700"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className={`font-semibold text-xs ${searchablePdf ? "text-white" : "text-slate-900"}`}>
-                              Searchable PDF (Vector Text)
-                            </span>
-                            {searchablePdf && <CheckCircle2 size={14} className="text-white shrink-0" />}
-                          </div>
-                          <p className={`text-[11px] mt-1 ${searchablePdf ? "text-slate-300" : "text-slate-400"}`}>
-                            Normal selectable vector text. Allows copy, search &amp; indexing.
-                          </p>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setSearchablePdf(false)}
-                          className={`p-3 rounded-xl border text-left transition-all ${
-                            !searchablePdf
-                              ? "border-black bg-slate-900 text-white shadow-xs"
-                              : "border-slate-200 hover:border-slate-400 bg-slate-50 text-slate-700"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className={`font-semibold text-xs ${!searchablePdf ? "text-white" : "text-slate-900"}`}>
-                              Non-Searchable PDF (Flat 300 DPI)
-                            </span>
-                            {!searchablePdf && <CheckCircle2 size={14} className="text-white shrink-0" />}
-                          </div>
-                          <p className={`text-[11px] mt-1 ${!searchablePdf ? "text-slate-300" : "text-slate-400"}`}>
-                            Flattened high-res raster pages. Uncopyable &amp; bot-tamper resistant.
-                          </p>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="px-5 pb-5">
-                  <button
-                    onClick={runConversion}
-                    disabled={!convId}
-                    className="w-full py-3.5 rounded-xl bg-black text-white font-semibold
-                               text-sm flex items-center justify-center gap-2
-                               disabled:opacity-40 hover:bg-slate-800 transition-colors shadow-xs"
-                  >
-                    Convert File Now <ArrowRight size={16} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ── Done state ── */}
-            {stage === "done" && result && (
-              <div className="bg-white rounded-2xl border shadow-sm p-8 flex flex-col items-center gap-5 text-center">
-                <div className="w-14 h-14 rounded-full bg-green-100 grid place-items-center">
-                  <CheckCircle2 size={28} className="text-green-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-xl text-slate-900">Conversion Successful!</p>
-                  <p className="text-slate-600 text-sm mt-1">{result.label}</p>
-                  <p className="text-slate-400 text-xs mt-1">
-                    {result.filename} · {(result.blob.size / 1024).toFixed(1)} KB
-                  </p>
-                  {result.elapsed !== "?" && (
-                    <p className="text-slate-400 text-xs flex items-center justify-center gap-1 mt-1">
-                      <Clock size={11} /> Converted in {result.elapsed}s
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-3 flex-wrap justify-center">
-                  <button
-                    onClick={() => triggerDownload(result.blob, result.filename)}
-                    className="px-7 py-2.5 bg-black text-white rounded-xl font-semibold
-                               text-sm flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-xs"
-                  >
-                    <Download size={16} /> Download File
-                  </button>
-                  <button
-                    onClick={resetFileMode}
-                    className="px-5 py-2.5 border rounded-xl text-sm flex items-center gap-2
-                               hover:bg-slate-50 transition-colors font-medium text-slate-700"
-                  >
-                    <RefreshCw size={14} /> Convert Another File
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ── Error state ── */}
-            {stage === "error" && (
-              <div className="bg-white rounded-2xl border border-red-200 p-6 flex flex-col items-center gap-4 text-center">
-                <div className="w-12 h-12 rounded-full bg-red-100 grid place-items-center">
-                  <AlertCircle size={24} className="text-red-500" />
-                </div>
-                <div>
-                  <p className="font-semibold text-red-700">Conversion failed</p>
-                  <p className="text-xs text-red-500 mt-1 max-w-sm">{error}</p>
-                </div>
-                <button
-                  onClick={resetFileMode}
-                  className="px-5 py-2 border rounded-xl text-sm flex items-center gap-2
-                             hover:bg-slate-50 transition-colors font-medium"
-                >
-                  <RefreshCw size={14} /> Try again
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════════════════════════════════
-            TAB 2: TYPE TO WORD / PDF CONVERTER
-           ═══════════════════════════════════════════════════════════════════════ */}
-        {activeTab === "text" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
-            <div className="flex items-center justify-between pb-3 border-b">
-              <div>
-                <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                  <FileText size={18} className="text-blue-600" /> Type or Paste Document Text
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Type your content directly. Outputs a professionally styled Word (.docx) or PDF document.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTypedText(SAMPLE_TEXT)}
-                  className="text-xs text-blue-600 hover:text-blue-800 bg-blue-50 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
-                >
-                  Load Sample
-                </button>
-                {typedText && (
-                  <button
-                    type="button"
-                    onClick={() => setTypedText("")}
-                    className="text-xs text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                    title="Clear text"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Typography & Format Control Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
-              {/* Target Format */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Output Format
-                </label>
-                <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-                  <button
-                    type="button"
-                    onClick={() => setTypedFormat("docx")}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center gap-1.5 transition-all ${
-                      typedFormat === "docx"
-                        ? "bg-blue-600 text-white shadow-2xs"
-                        : "text-slate-600 hover:text-black"
-                    }`}
-                  >
-                    <span>📝</span> Word (.docx)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTypedFormat("pdf")}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-md flex items-center justify-center gap-1.5 transition-all ${
-                      typedFormat === "pdf"
-                        ? "bg-blue-600 text-white shadow-2xs"
-                        : "text-slate-600 hover:text-black"
-                    }`}
-                  >
-                    <span>📕</span> PDF (.pdf)
-                  </button>
-                </div>
-              </div>
-
-              {/* Font Family */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Font Family
-                </label>
-                <select
-                  value={typedFont}
-                  onChange={(e) => setTypedFont(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 focus:outline-hidden focus:border-black"
-                >
-                  {TYPED_FONT_OPTIONS.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.label} ({f.description})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Font Size */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Font Size
-                </label>
-                <select
-                  value={typedFontSize}
-                  onChange={(e) => setTypedFontSize(Number(e.target.value))}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800 focus:outline-hidden focus:border-black"
-                >
-                  <option value={10}>10 pt (Compact)</option>
-                  <option value={11}>11 pt (Standard Modern)</option>
-                  <option value={12}>12 pt (Standard Academic)</option>
-                  <option value={14}>14 pt (Large Print)</option>
-                  <option value={16}>16 pt (Headlines / Prominent)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* If PDF selected in Typed Mode: Searchable toggle */}
-            {typedFormat === "pdf" && (
-              <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <Shield size={16} className="text-blue-700" />
-                  <div>
-                    <span className="text-xs font-bold text-blue-900 block">PDF Output Mode</span>
-                    <span className="text-[11px] text-blue-700">
-                      {typedSearchable
-                        ? "Searchable vector PDF (selectable text & small size)"
-                        : "Non-searchable 300 DPI flat raster PDF (tamper-proof image)"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-200">
-                  <button
-                    type="button"
-                    onClick={() => setTypedSearchable(true)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                      typedSearchable ? "bg-blue-600 text-white shadow-2xs" : "text-blue-800"
-                    }`}
-                  >
-                    Searchable
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTypedSearchable(false)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                      !typedSearchable ? "bg-blue-600 text-white shadow-2xs" : "text-blue-800"
-                    }`}
-                  >
-                    Non-Searchable
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Live Textarea */}
-            <div className="relative">
-              <textarea
-                value={typedText}
-                onChange={(e) => setTypedText(e.target.value)}
-                placeholder="Type or paste your text here (supports English, Hindi / हिन्दी, numbers, symbols, lists)..."
-                rows={12}
-                className="w-full p-4 text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:border-black focus:ring-1 focus:ring-black placeholder:text-slate-400 font-sans leading-relaxed resize-y"
-              />
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1.5 px-1">
-                <span>{wordCount} words · {charCount} characters</span>
-                <span className="text-blue-600 font-medium">Automatic Devanagari ligature pairing active</span>
-              </div>
-            </div>
-
-            {textError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex items-center gap-2">
-                <AlertCircle size={15} /> {textError}
-              </div>
-            )}
-
-            {/* Action button */}
-            <button
-              type="button"
-              onClick={runTextConversion}
-              disabled={textStage === "converting" || !typedText.trim()}
-              className="w-full py-3.5 rounded-xl bg-black text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-40 hover:bg-slate-800 transition-all shadow-xs"
-            >
-              {textStage === "converting" ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" /> Generating Document…
-                </>
-              ) : (
-                <>
-                  Convert &amp; Download {typedFormat === "docx" ? "Word (.docx)" : "PDF (.pdf)"}{" "}
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
-
-            {/* Text conversion done banner */}
-            {textStage === "done" && textResult && (
-              <div className="p-5 bg-green-50/80 border border-green-200 rounded-xl flex items-center justify-between flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-green-100 grid place-items-center text-green-700">
-                    <CheckCircle2 size={20} />
-                  </div>
-                  <div>
-                    <p className="font-bold text-sm text-green-950">Document Created Successfully!</p>
-                    <p className="text-xs text-green-800 mt-0.5">
-                      {textResult.filename} · {(textResult.blob.size / 1024).toFixed(1)} KB · {textResult.elapsed}s
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => triggerDownload(textResult.blob, textResult.filename)}
-                  className="px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white rounded-lg font-semibold text-xs flex items-center gap-2 transition-colors shadow-2xs"
-                >
-                  <Download size={14} /> Download Again
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Conversion History (Persists across both tabs) ── */}
-        {history.length > 0 && (
-          <div className="bg-white rounded-2xl border p-5 shadow-xs">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
-              Recent Conversions
-            </p>
-            <div className="divide-y divide-slate-100">
-              {history.map((h, i) => (
-                <div key={i} className="py-2.5 flex items-center gap-3">
-                  <span className="text-xl shrink-0">
-                    {FORMAT_ICON[h.filename.split(".").pop() ?? ""] ?? "📄"}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium truncate text-slate-800">{h.filename}</p>
-                    <p className="text-[11px] text-slate-400">
-                      {h.label} · {(h.blob.size / 1024).toFixed(1)} KB
-                      {h.elapsed !== "?" && ` · ${h.elapsed}s`}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => triggerDownload(h.blob, h.filename)}
-                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 shrink-0"
-                    title="Download again"
-                  >
-                    <Download size={15} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* ── Footer ── */}
-      <footer className="text-center text-xs text-slate-400 py-6 border-t bg-white mt-auto">
-        Anything Convertable · Image→PDF · Word→PDF · PDF→Word · PPT→PDF · PDF→PPT · Text to Word / PDF Studio
-      </footer>
-    </div>
-  );
+  function reset() {
+    request.current++; setFile(null); setResult(null); setStage("idle"); setAvailable([]); setError("");
+    if (input.current) input.current.value = "";
+  }
+  async function chooseFile(next: File) {
+    const id = ++request.current;
+    setFile(next); setResult(null); setError(""); setStage("detecting");
+    try {
+      const detection = await detectFile(next);
+      if (id !== request.current) return;
+      if (!detection.suggested.length) throw new Error("This file format is not supported. Choose an image, PDF, DOCX or PPTX file.");
+      setCatalogError("");
+      setAvailable(detection.suggested);
+      if (!detection.suggested.includes(selected)) setSelected(detection.suggested[0]);
+      setCatalog(current => [...current.filter(c => !detection.suggested.includes(c.id)), ...detection.all_conversions]);
+      setFont("original"); setStage("ready");
+    } catch (e) { if (id === request.current) { setError(e instanceof Error ? e.message : "Unable to read this file."); setStage("error"); } }
+  }
+  async function run() {
+    if (!file || busy) return;
+    setStage("converting"); setError("");
+    try {
+      const output = await convertFile(file, selected, selected === "pdf_to_ppt" && fidelity === "appearance" ? "original" : font, searchable, fidelity);
+      const completed = { ...output, label: tool.title };
+      setResult(completed); setHistory(h => [completed, ...h].slice(0, 5)); setStage("done");
+    } catch (e) { setError(e instanceof Error ? e.message : "Conversion failed."); setStage("error"); }
+  }
+  async function runText() {
+    if (!text.trim() || textBusy) return;
+    setTextBusy(true); setTextError(""); setTextResult(null);
+    try {
+      const output = await convertText({ text, to_format: format, font: textFont, font_size: fontSize, searchable });
+      const completed = { ...output, label: `Text to ${format === "docx" ? "Word" : "PDF"}` };
+      setTextResult(completed); setHistory(h => [completed, ...h].slice(0, 5));
+    } catch (e) { setTextError(e instanceof Error ? e.message : "Unable to create document."); }
+    finally { setTextBusy(false); }
+  }
+  function resultPanel(output: Result) {
+    return <div className="result" role="status">
+      <div className="result-heading"><span className="success-icon"><CheckCircle2 size={24} /></span><div><h3>Your file is ready</h3><p className="filename">{output.filename}</p><p>{size(output.blob.size)}{output.elapsed && ` · Converted in ${output.elapsed}s`}</p></div></div>
+      {!!output.warnings.length && <div className="quality-notes"><h4><Info size={15} /> Conversion notes</h4><ul>{output.warnings.map(w => <li key={w}>{w}</li>)}</ul></div>}
+      <button className="button primary full" onClick={() => save(output)}><ArrowDownToLine size={17} /> Download {output.filename.split(".").pop()?.toUpperCase()}</button>
+    </div>;
+  }
+  return <div className="app-shell">
+    <a href="#workspace" className="skip-link">Skip to converter</a>
+    <header className="site-header"><div className="header-inner">
+      <a className="brand" href="/" aria-label="Anything Convertable home"><span className="brand-mark"><Files size={21} /></span><span>Anything<span className="brand-light"> Convertable</span></span></a>
+      <span className="header-note">A little less file friction.</span>
+    </div></header>
+    <main className="main">
+      <section className="hero"><div className="eyebrow"><span /> YOUR EVERYDAY DOCUMENT WORKSPACE</div><h1>New format.<br className="mobile-break" /> Same attention to detail.</h1><p>Convert documents, images and presentations.<br className="desktop-break" /> Thoughtful controls. Clear results. All in one place.</p></section>
+      <div className="workspace-tabs" role="tablist" aria-label="Workspace"><button role="tab" aria-selected={tab === "files"} aria-controls="workspace" id="files-tab" disabled={textBusy} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}><Files size={16} /> Convert files</button><button role="tab" aria-selected={tab === "text"} aria-controls="workspace" id="text-tab" disabled={busy} className={tab === "text" ? "active" : ""} onClick={() => setTab("text")}><Type size={17} /> Write a document</button></div>
+      <div id="workspace" role="tabpanel" aria-labelledby={`${tab}-tab`}>
+      {tab === "files" ? <div className="workspace-grid">
+        <aside className="tool-panel"><div className="section-label"><span className="step-number">1</span> Choose your tool</div><div className="tool-list">
+          {TOOLS.map(t => { const Icon = t.icon; const disabled = busy || (!!file && stage !== "done" && available.length > 0 && !available.includes(t.id)); return <button key={t.id} className={`tool-card ${selected === t.id ? "selected" : ""}`} aria-pressed={selected === t.id} disabled={disabled} onClick={() => { if (stage === "done") reset(); setSelected(t.id); setFont("original"); }}><span className="tool-icon"><Icon size={20} /></span><span className="tool-copy"><strong>{t.title}</strong><small>{t.formats}</small></span><ChevronRight size={16} className="tool-chevron" /></button>; })}
+        </div><div className="sidebar-note"><SlidersHorizontal size={17} /><p>Original fonts by default.<br />Extra control when you need it.</p></div></aside>
+        <section className="converter-panel" aria-busy={busy}>
+          <div className="panel-heading"><div><span className="section-label"><span className="step-number">2</span> Upload & convert</span><h2>{tool.title}</h2><p>{tool.description}</p></div><span className="format-badge">{tool.ext}</span></div>
+          {catalogError && <div className="notice" role="alert">{catalogError}<button className="text-button" onClick={loadCatalog}>Retry connection</button></div>}
+          {stage === "done" && result ? <>{resultPanel(result)}<button className="button secondary full" onClick={reset}><RefreshCw size={16} /> Convert another file</button></> : <>
+          <input ref={input} type="file" accept={ACCEPT} className="visually-hidden" tabIndex={-1} aria-label="Upload file" onChange={e => { const f = e.target.files?.[0]; if (f) void chooseFile(f); }} />
+          {!file ? <button className={`drop-zone ${dragging ? "dragging" : ""}`} onClick={() => input.current?.click()} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) void chooseFile(f); }}><span className="upload-icon"><Upload size={25} strokeWidth={1.6} /></span><strong>Choose a file to get started</strong><span>or drag and drop it here</span><span className="browse-label">Browse files <ArrowRight size={15} /></span><small>Images, PDF, DOCX or PPTX</small></button> : <div className="uploaded-file"><span className="file-icon"><File size={23} /></span><div><strong className="filename">{file.name}</strong><span>{size(file.size)} · {stage === "detecting" ? "Checking file contents…" : "File selected"}</span></div><button aria-label="Remove file" className="icon-button" disabled={busy} onClick={reset}><X size={18} /></button></div>}
+          {(stage === "ready" || stage === "converting") && <div className="settings">
+            <div className="settings-heading"><SlidersHorizontal size={15} /><h3>Conversion settings</h3></div>
+            {selected === "pdf_to_ppt" && <label className="field">Slide content<select value={fidelity} disabled={busy} onChange={e => setFidelity(e.target.value)}><option value="appearance">Preserve appearance (recommended)</option><option value="editable">Editable text</option></select><small>{fidelity === "appearance" ? "Keeps each complete page as a high-resolution slide image. Text is not editable." : "Editable text with a preserved graphics layer. Font spacing may change."}</small></label>}
+            {metadata?.supports_font_choice && !(selected === "pdf_to_ppt" && fidelity === "appearance") && <label className="field">Font family<select value={font} disabled={busy} onChange={e => setFont(e.target.value)}><option value="original">Keep original fonts (recommended)</option>{FONTS.map(f => <option key={f}>{f}</option>)}</select><small>{font === "original" ? "Preserves detected font names where possible. Scanned fonts are estimated." : "Changing fonts may change spacing and page breaks."}</small></label>}
+            {metadata?.supports_searchable_option && <label className="field">PDF content<select value={String(searchable)} disabled={busy} onChange={e => setSearchable(e.target.value === "true")}><option value="true">Selectable text</option><option value="false">Flattened page images (300 DPI)</option></select><small>Flattening removes text selection; it does not prevent editing or OCR.</small></label>}
+            {selected === "image_to_pdf" && <p className="setting-note"><Check size={16} /> Original resolution, automatic orientation and all image pages.</p>}
+            {selected === "pdf_to_word" && <p className="setting-note"><Info size={16} /> Scanned pages include OCR text and a source image for reference.</p>}
+          </div>}
+          {error && <div className="notice error" role="alert">{error}<button className="text-button" onClick={reset}>Choose another file</button></div>}
+          <button className="button primary full convert-button" disabled={stage !== "ready"} onClick={run}>{busy ? <><Loader2 size={18} className="spin" />{stage === "detecting" ? "Analyzing file…" : "Converting your document…"}</> : <>Convert to {tool.ext} <ArrowRight size={17} /></>}</button>
+          {stage === "converting" && <p className="processing-note" role="status">Checking pages, images and typography. Large files and scans can take longer.</p>}
+          <div className="panel-footnote"><Info size={14} /><span>Quality depends on your source. We flag conversion limitations with your result.</span></div>
+          </>}
+        </section>
+      </div> : <section className="text-panel"><div className="panel-heading"><div><span className="section-label">TEXT STUDIO</span><h2>A blank page. A fresh start.</h2><p>Write or paste your text, then make it a document.</p></div><Type size={28} strokeWidth={1.4} /></div>
+        <div className="text-controls"><label className="field">Save as<select disabled={textBusy} value={format} onChange={e => setFormat(e.target.value as "docx" | "pdf")}><option value="docx">Word document (.docx)</option><option value="pdf">PDF document (.pdf)</option></select></label><label className="field">Font family<select disabled={textBusy} value={textFont} onChange={e => setTextFont(e.target.value)}>{FONTS.map(f => <option key={f}>{f}</option>)}</select></label><label className="field">Font size<select disabled={textBusy} value={fontSize} onChange={e => setFontSize(Number(e.target.value))}>{[10, 11, 12, 14, 16, 18, 24].map(n => <option key={n} value={n}>{n} pt</option>)}</select></label></div>
+        <label className="visually-hidden" htmlFor="document-text">Document text</label><textarea id="document-text" disabled={textBusy} value={text} onChange={e => setText(e.target.value)} placeholder="Your next document starts here…" rows={12} /><div className="editor-footer"><span>{wordCount} words · {text.length} characters</span><button className="text-button" disabled={textBusy || !text} onClick={() => { setText(""); setTextResult(null); }}>Clear text</button></div>
+        {format === "pdf" && <label className="check-field"><input type="checkbox" checked={searchable} disabled={textBusy} onChange={e => setSearchable(e.target.checked)} /> Keep text selectable</label>}
+        {textError && <div className="notice error" role="alert">{textError}</div>}
+        <button className="button primary full" disabled={!text.trim() || textBusy} onClick={runText}>{textBusy ? <><Loader2 size={17} className="spin" /> Creating document…</> : <>Create {format === "docx" ? "Word document" : "PDF"} <ArrowRight size={17} /></>}</button>
+        {textResult && resultPanel(textResult)}
+      </section>}
+      </div>
+      <section className="details-row" aria-label="Conversion approach"><div><FileImage size={20} /><h3>Details stay in focus</h3><p>Preserve image resolution and page proportions.</p></div><div><Type size={20} /><h3>Typography, considered</h3><p>Keep source fonts or choose your own typeface.</p></div><div><CheckCircle2 size={20} /><h3>Know your result</h3><p>Clear notes for OCR, fonts and editable output.</p></div></section>
+      {!!history.length && <section className="history"><div className="history-heading"><h2>Recent conversions</h2><span>This session only</span></div>{history.map((h, i) => <div className="history-item" key={`${h.filename}-${i}`}><FileText size={20} /><div><strong className="filename">{h.filename}</strong><span>{h.label} · {size(h.blob.size)}</span></div><button className="icon-button" aria-label={`Download ${h.filename}`} onClick={() => save(h)}><ArrowDownToLine size={18} /></button></div>)}</section>}
+    </main>
+    <footer className="site-footer"><span>Anything Convertable</span><span>Made for your everyday documents.</span></footer>
+  </div>;
 }

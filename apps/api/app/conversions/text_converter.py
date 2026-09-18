@@ -18,7 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-from .fonts import has_devanagari, has_non_latin, register_reportlab_font
+from .fonts import has_devanagari, register_reportlab_font
 from .pdf_utils import make_non_searchable_pdf
 
 
@@ -83,7 +83,7 @@ def text_to_word(text_data: str | bytes, font: str = "Calibri", font_size: float
         r.font.size = Pt(font_size)
 
         # Apply XML font properties for Latin + Complex Scripts
-        is_unicode = has_devanagari(trimmed) or has_non_latin(trimmed)
+        is_unicode = has_devanagari(trimmed)
         chosen_font = unicode_font_name if is_unicode else target_font
 
         r.font.name = chosen_font
@@ -117,6 +117,13 @@ def text_to_pdf(
     else:
         raw_text = text_data
 
+    from .office import render_office
+    from .quality import note
+    native = render_office(text_to_word(raw_text, font, font_size), "docx")
+    if native is not None:
+        return native if searchable else make_non_searchable_pdf(native, dpi=300)
+    if has_devanagari(raw_text):
+        note("The fallback PDF renderer may not shape complex scripts correctly. Use Word output or install LibreOffice.")
     target_font = _normalize_font_name(font)
     reg_font = register_reportlab_font(target_font)
     unicode_font = register_reportlab_font("devanagari")
@@ -141,7 +148,7 @@ def text_to_pdf(
             continue
 
         escaped = html.escape(trimmed)
-        use_font = unicode_font if (has_devanagari(trimmed) or has_non_latin(trimmed)) else reg_font
+        use_font = unicode_font if (has_devanagari(trimmed)) else reg_font
 
         ps = ParagraphStyle(
             name="CustomTextPara",

@@ -1,26 +1,8 @@
-"""
-fonts.py — shared Unicode & TrueType font discovery, registration, and styling.
-
-Provides a single source of truth for locating, registering, and styling fonts across:
-- word_to_pdf (ReportLab TrueType metrics & vector text)
-- ppt_to_pdf  (Pillow TrueType rendering with exact font-family matching)
-- pdf_to_word (Word OpenXML w:rFonts for ascii, hAnsi, and cs)
-- pdf_to_ppt  (PowerPoint OpenXML a:latin and a:cs)
-- text_to_word & text_to_pdf (direct typography engine)
-
-Supported fonts:
-1. Keep Original
-2. Times New Roman (Classic Serif)
-3. Arial (Modern Sans-Serif)
-4. Calibri (Office Sans-Serif)
-5. Georgia (High-Legibility Serif)
-6. Noto Sans Devanagari / Arial Unicode (100% Hindi/Unicode Support)
-"""
+"""Local font discovery for fallback renderers. Font substitution is not exact font preservation."""
 from __future__ import annotations
 
 import os
 import re
-import urllib.request
 from functools import lru_cache
 from pathlib import Path
 
@@ -87,26 +69,6 @@ _FONT_FAMILY_CANDIDATES: dict[str, list[str]] = {
 }
 
 
-def _download_noto_sans_devanagari() -> str | None:
-    """Download Noto Sans Devanagari Regular to local font cache if missing."""
-    dest = _FONT_CACHE_DIR / "NotoSansDevanagari-Regular.ttf"
-    if dest.exists() and dest.stat().st_size > 10_000:
-        return str(dest)
-    try:
-        _FONT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        url = (
-            "https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/"
-            "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf"
-        )
-        print(f"[fonts] Downloading Noto Sans Devanagari → {dest}")
-        urllib.request.urlretrieve(url, str(dest))
-        if dest.stat().st_size > 10_000:
-            return str(dest)
-    except Exception as exc:
-        print(f"[fonts] Download failed: {exc}")
-    return None
-
-
 @lru_cache(maxsize=16)
 def get_font_path(family: str = "devanagari") -> str | None:
     """Return the absolute path to the best available TrueType font for the given family."""
@@ -124,28 +86,17 @@ def get_font_path(family: str = "devanagari") -> str | None:
         elif "georgia" in fam_key:
             candidates = _FONT_FAMILY_CANDIDATES["georgia"]
         else:
-            candidates = _FONT_FAMILY_CANDIDATES["devanagari"]
+            candidates = []
 
     for path in candidates:
         if os.path.isfile(path) and os.path.getsize(path) > 10_000:
             return path
 
-    # Local bundled cache
-    bundled = _FONT_CACHE_DIR / "NotoSansDevanagari-Regular.ttf"
-    if bundled.exists() and bundled.stat().st_size > 10_000:
-        return str(bundled)
-
-    # Download if Devanagari
-    if "deva" in fam_key or "noto" in fam_key or "hindi" in fam_key:
-        downloaded = _download_noto_sans_devanagari()
-        if downloaded:
-            return downloaded
-
     return None
 
 
 def get_unicode_font_path() -> str | None:
-    """Return path to universal Unicode / Devanagari font."""
+    """Return a Devanagari font path; this is not a universal-script fallback."""
     return get_font_path("devanagari")
 
 
@@ -157,17 +108,19 @@ _REGISTERED_RL_FONTS: dict[str, str] = {}
 def register_reportlab_font(family_name: str) -> str:
     """
     Register a TrueType font in ReportLab's pdfmetrics and return its registered name.
-    Falls back to Unicode font if needed, and finally Helvetica.
+    Falls back to Helvetica when the requested family is unavailable.
     """
     cleaned = family_name.strip()
     key = cleaned.lower().replace(" ", "").replace("-", "")
 
-    if key in _REGISTERED_RL_FONTS:
-        return _REGISTERED_RL_FONTS[key]
-
+    from .quality import note
     path = get_font_path(cleaned)
     if not path:
-        path = get_unicode_font_path()
+        note(f"Font {cleaned} is unavailable in the fallback renderer; Helvetica was substituted.")
+    elif "calibri" in key and "calibri" not in path.lower():
+        note("Calibri is unavailable in the fallback renderer; a substitute font was used.")
+    if key in _REGISTERED_RL_FONTS:
+        return _REGISTERED_RL_FONTS[key]
 
     if path and os.path.isfile(path):
         try:
@@ -204,8 +157,6 @@ def get_pil_font_by_name(font_name: str | None = None, size_px: int = 16):
 
     fam = font_name or "arial"
     path = get_font_path(fam)
-    if not path:
-        path = get_unicode_font_path()
 
     if path and os.path.isfile(path):
         try:

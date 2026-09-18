@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConversionInfo(BaseModel):
@@ -22,8 +22,8 @@ class DetectResponse(BaseModel):
 
 class TextConvertRequest(BaseModel):
     """Payload for direct text-to-document conversion (live typing / paste)."""
-    text: str
+    text: str = Field(min_length=1, max_length=500000)
     to_format: str = "docx"           # "docx" or "pdf"
     font: str = "Calibri"             # Times New Roman, Arial, Calibri, Georgia
-    font_size: float = 12.0
+    font_size: float = Field(default=12.0, ge=6, le=72)
     searchable: bool = True           # applicable when to_format is "pdf"

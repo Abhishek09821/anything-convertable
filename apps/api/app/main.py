@@ -21,6 +21,12 @@ Routes:
 from __future__ import annotations
 
 import os
+import io
+import json
+import zipfile
+from urllib.parse import quote
+from starlette.concurrency import run_in_threadpool
+from .conversions.quality import begin_report, get_notes
 import time
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -40,32 +46,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "X-Elapsed-Seconds", "X-Conversion-Id", "X-Conversion-Warnings"],
 )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-
-def _ext(filename: str, content_type: str) -> str:
-    """Best-effort file extension from name or MIME type."""
-    if filename:
-        _, dot_ext = os.path.splitext(filename.lower())
-        if dot_ext:
-            return dot_ext
-
-    mime = (content_type or "").lower()
-    _MIME_MAP = {
-        "image/jpeg": ".jpg",
-        "image/jpg":  ".jpg",
-        "image/png":  ".png",
-        "application/pdf": ".pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-        "application/msword": ".doc",
-        "application/vnd.ms-powerpoint": ".ppt",
-        "text/plain": ".txt",
-    }
-    return _MIME_MAP.get(mime, "")
-
 
 def _to_info(c: Conversion) -> ConversionInfo:
     return ConversionInfo(
@@ -93,41 +78,49 @@ def list_conversions():
     return [_to_info(c) for c in get_all()]
 
 
+def _detect_content(data: bytes) -> str:
+    if data.startswith(b"%PDF"):
+        return ".pdf"
+    if data.startswith(b"PK"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                names = set(archive.namelist())
+                if "word/document.xml" in names:
+                    return ".docx"
+                if "ppt/presentation.xml" in names:
+                    return ".pptx"
+        except zipfile.BadZipFile:
+            return ""
+    from PIL import Image
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "TIFF": ".tiff", "BMP": ".bmp", "GIF": ".gif"}.get(image.format, "")
+    except Exception:
+        return ""
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
+    if len(data) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB limit")
+    if not data:
+        raise HTTPException(400, "Uploaded file is empty")
+    return data
+
+
+def _run_conversion(fn, data, kwargs):
+    begin_report()
+    result = fn(data, **kwargs)
+    return result, get_notes()
+
+
 @app.post("/v1/detect", response_model=DetectResponse)
 async def detect(file: UploadFile = File(...)):
-    """
-    Detect file type and return the conversions available for it.
-    Reads only the first 4 bytes (magic bytes) — very fast.
-    """
-    header = await file.read(4)
-    await file.seek(0)
-
-    filename = file.filename or ""
-    content_type = file.content_type or ""
-    ext = _ext(filename, content_type)
-
-    # Magic-byte override for common formats (more reliable than extension)
-    if header[:4] == b"%PDF":
-        ext = ".pdf"
-    elif header[:4] in (b"PK\x03\x04",):
-        # ZIP-based: DOCX or PPTX — trust extension
-        if not ext:
-            ext = ".docx"  # safer default
-    elif header[:3] in (b"\xff\xd8\xff",):
-        ext = ".jpg"
-    elif header[:8] == b"\x89PNG\r\n\x1a\n":
-        ext = ".png"
-
-    matching = get_for_file(ext)
-
-    # Suggestion order: exact match first, then others
-    suggested = [c.id for c in matching]
-
-    return DetectResponse(
-        ext=ext,
-        suggested=suggested,
-        all_conversions=[_to_info(c) for c in matching],
-    )
+    data = await _read_upload(file)
+    ext = await run_in_threadpool(_detect_content, data)
+    matching = get_for_file(ext) if ext else []
+    return DetectResponse(ext=ext, suggested=[c.id for c in matching],
+        all_conversions=[_to_info(c) for c in matching])
 
 
 @app.post("/v1/convert/{conversion_id}")
@@ -136,6 +129,7 @@ async def convert(
     file: UploadFile = File(...),
     font: str = "original",
     searchable: bool = True,
+    fidelity: str = "editable",
 ):
     """
     Run a conversion and stream back the output file.
@@ -145,22 +139,15 @@ async def convert(
         valid = [c.id for c in get_all()]
         raise HTTPException(404, f"Unknown conversion '{conversion_id}'. Valid: {valid}")
 
-    data = await file.read()
+    data = await _read_upload(file)
     filename = file.filename or "document"
-
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB limit")
-
-    if len(data) == 0:
-        raise HTTPException(400, "Uploaded file is empty")
-
-    # Validate extension matches what this conversion accepts
-    ext = _ext(filename, file.content_type or "")
-    if ext and ext not in conv.accepts:
-        # Soft warning only — don't block (user may rename files)
-        print(f"[convert] WARNING: {filename} has ext '{ext}' but {conversion_id} accepts {conv.accepts}")
-
-    print(f"[convert] id={conversion_id} file={filename} size={len(data):,} bytes font={font} searchable={searchable}")
+    ext = await run_in_threadpool(_detect_content, data)
+    if ext not in conv.accepts:
+        raise HTTPException(422, "The file contents do not match this converter. Choose a supported, undamaged file.")
+    if font not in ("original", "Times New Roman", "Arial", "Calibri", "Georgia"):
+        raise HTTPException(422, "Unsupported font choice")
+    if fidelity not in ("appearance", "editable"):
+        raise HTTPException(422, "Unsupported conversion mode")
     t0 = time.perf_counter()
 
     try:
@@ -170,7 +157,11 @@ async def convert(
         if conv.supports_searchable_option:
             kwargs["searchable"] = searchable
 
-        result = conv.fn(data, **kwargs)
+        if conversion_id == "pdf_to_ppt":
+            kwargs["fidelity"] = fidelity
+        result, warnings = await run_in_threadpool(_run_conversion, conv.fn, data, kwargs)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     except AssertionError as exc:
         raise HTTPException(422, f"Conversion validation failed: {exc}")
     except Exception as exc:
@@ -187,7 +178,8 @@ async def convert(
         content=result,
         media_type=conv.output_mime,
         headers={
-            "Content-Disposition": f'attachment; filename="{dl_name}"',
+            "Content-Disposition": f"attachment; filename=converted.{conv.output_ext}; filename*=UTF-8''{quote(dl_name, safe='')}",
+            "X-Conversion-Warnings": json.dumps(warnings, ensure_ascii=True),
             "X-Conversion-Id": conversion_id,
             "X-Elapsed-Seconds": f"{elapsed:.2f}",
         },
@@ -209,17 +201,12 @@ async def convert_text(req: TextConvertRequest):
     t0 = time.perf_counter()
     try:
         if fmt in ("docx", "word"):
-            result = text_to_word(req.text, font=req.font, font_size=req.font_size)
+            result, warnings = await run_in_threadpool(_run_conversion, text_to_word, req.text, {"font": req.font, "font_size": req.font_size})
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             dl_name = "typed-document.docx"
             out_id = "text_to_word"
         else:
-            result = text_to_pdf(
-                req.text,
-                font=req.font,
-                font_size=req.font_size,
-                searchable=req.searchable,
-            )
+            result, warnings = await run_in_threadpool(_run_conversion, text_to_pdf, req.text, {"font": req.font, "font_size": req.font_size, "searchable": req.searchable})
             media_type = "application/pdf"
             dl_name = "typed-document.pdf"
             out_id = "text_to_pdf"
@@ -235,6 +222,7 @@ async def convert_text(req: TextConvertRequest):
         media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{dl_name}"',
+            "X-Conversion-Warnings": json.dumps(warnings, ensure_ascii=True),
             "X-Conversion-Id": out_id,
             "X-Elapsed-Seconds": f"{elapsed:.2f}",
         },

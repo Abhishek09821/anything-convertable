@@ -1,21 +1,4 @@
-"""
-Word (DOCX) → PDF
-
-Accuracy strategy (iLovePDF-grade):
-- Parse the DOCX with python-docx to extract every paragraph and table.
-- Render to PDF with ReportLab, preserving:
-    • Heading levels (font size + bold)
-    • Body text (font family, size, bold, italic, underline, colour)
-    • Paragraph alignment (left, center, right, justify)
-    • Line spacing and space-before / space-after
-    • Tables (borders, column widths, cell text, header row bold)
-    • Inline images (extracted from DOCX zip, embedded in PDF)
-    • Page size from the document's section (A4 default)
-    • Margins from the document's section
-- Hindi / Devanagari text is fully supported via a registered Unicode TTF font.
-- No external tools (no LibreOffice, no subprocess).
-- Typical 10-page document converts in < 3 seconds.
-"""
+"""Word to PDF: prefer native LibreOffice rendering; warn when using the limited ReportLab fallback."""
 from __future__ import annotations
 
 import io
@@ -42,7 +25,7 @@ from reportlab.platypus import (
 )
 
 from .fonts import (
-    has_non_latin,
+    has_devanagari,
     register_reportlab_font,
     register_reportlab_unicode_font,
 )
@@ -89,7 +72,7 @@ def _choose_font(text: str, base_font: str, base_bold: str,
                   unicode_font: str, unicode_bold: str,
                   want_bold: bool = False) -> str:
     """Pick the right font based on text content."""
-    if has_non_latin(text):
+    if has_devanagari(text):
         return unicode_bold if want_bold else unicode_font
     return base_bold if want_bold else base_font
 
@@ -112,7 +95,7 @@ def _run_xml_to_html(run, unicode_font: str, unicode_bold: str) -> str:
         return ""
 
     # If text has non-Latin chars, wrap with the Unicode font
-    needs_unicode = has_non_latin(run.text)
+    needs_unicode = has_devanagari(run.text)
 
     tag_open = ""
     tag_close = ""
@@ -234,7 +217,7 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
     if pf.space_after and pf.space_after.pt:
         space_after = pf.space_after.pt
     if pf.line_spacing and isinstance(pf.line_spacing, (int, float)):
-        leading = font_size * (pf.line_spacing / 240.0)
+        leading = pf.line_spacing.pt if hasattr(pf.line_spacing, "pt") else font_size * pf.line_spacing
 
     # Override font size from first run if it has explicit size
     if para.runs:
@@ -245,7 +228,7 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
     align = _align(str(para.alignment) if para.alignment else None)
 
     # Choose font — use Unicode font for non-Latin text, or resolved TrueType font
-    needs_unicode = has_non_latin(full_text)
+    needs_unicode = has_devanagari(full_text)
     if needs_unicode:
         font_name = unicode_bold if bold_default else unicode_font
     else:
@@ -259,7 +242,7 @@ def _para_to_flowable(para, page_width_pt: float, margin_pt: float,
         if run_font:
             font_name = register_reportlab_font(run_font)
         else:
-            font_name = unicode_font
+            font_name = "Helvetica"
 
     if bold_default and html_text and not html_text.startswith("<b>"):
         html_text = f"<b>{html_text}</b>"
@@ -302,7 +285,7 @@ def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
             raw_text = " ".join(p.text for p in cell.paragraphs).strip()
             escaped_text = _escape_html(raw_text)
             is_bold = ri == 0  # header row
-            needs_unicode = has_non_latin(raw_text)
+            needs_unicode = has_devanagari(raw_text)
             if needs_unicode:
                 cell_font = unicode_bold if is_bold else unicode_font
             else:
@@ -344,6 +327,10 @@ def _table_to_flowable(tbl, page_width_pt: float, margin_pt: float,
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def convert(data: bytes, font: str = "original", searchable: bool = True) -> bytes:
+    from .office import render_office
+    native = render_office(data, "docx", font)
+    if native is not None:
+        return native if searchable else make_non_searchable_pdf(native, dpi=300)
     # Register Unicode font for Hindi/Devanagari support
     unicode_font, unicode_bold = register_reportlab_unicode_font()
 
@@ -353,6 +340,8 @@ def convert(data: bytes, font: str = "original", searchable: bool = True) -> byt
         unicode_font = reg
         unicode_bold = reg
 
+    from .office import apply_office_font
+    data = apply_office_font(data, font)
     doc = Document(io.BytesIO(data))
     images = _extract_images(data)
 

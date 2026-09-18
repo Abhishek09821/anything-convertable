@@ -1,23 +1,4 @@
-"""
-PowerPoint (PPTX) → PDF
-
-Accuracy strategy (iLovePDF-grade):
-- Render each slide to a high-resolution PNG (200 DPI) using python-pptx + Pillow.
-- Universal image extraction:
-  * Direct picture shapes (MSO_SHAPE_TYPE.PICTURE)
-  * Picture placeholders
-  * AutoShapes with picture/texture fills (<a:blipFill>)
-  * Slide background pictures (<p:bg>)
-  * Group shapes (recursive rendering of all grouped images and text)
-  * Proper alpha transparency masking for PNG/transparent assets.
-- Use proper TrueType font rendering (Noto Sans / Arial Unicode) instead of
-  PIL's default bitmap font — text is sharp and correctly sized.
-- Hindi / Devanagari text is fully supported via Unicode TTF fonts.
-- Slide background fill (solid colour, image, or theme) is rendered correctly.
-- All text shapes: font, size, bold, italic, colour, alignment, word wrap.
-- Tables: all cells rendered with borders and background colours.
-- Each rendered slide PNG is embedded into a PDF page at the exact aspect ratio.
-"""
+"""PowerPoint to PDF: prefer native LibreOffice rendering; warn when using the raster fallback."""
 from __future__ import annotations
 
 import io
@@ -345,6 +326,14 @@ def _render_slide(slide, slide_w_emu: int, slide_h_emu: int) -> Image.Image:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def convert(data: bytes, font: str = "original", searchable: bool = True) -> bytes:
+    from .office import render_office
+    native = render_office(data, "pptx", font)
+    if native is not None:
+        return native if searchable else make_non_searchable_pdf(native, dpi=300)
+    from .quality import note
+    from .office import apply_office_font
+    note("This fallback produces image slides; text is not searchable.")
+    data = apply_office_font(data, font)
     prs = Presentation(io.BytesIO(data))
 
     slide_w_emu = int(prs.slide_width) if prs.slide_width is not None else 9144000

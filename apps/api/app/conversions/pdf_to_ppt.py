@@ -1,23 +1,4 @@
-"""
-PDF → PowerPoint (PPTX)
-
-Accuracy strategy (iLovePDF-grade):
-- Real embedded image extraction: every image in the PDF is extracted at native
-  resolution and placed as an independent, editable Picture shape in PowerPoint
-  at its exact bounding coordinates.
-- Layout & text reconstruction: text spans from PDF are grouped into clean,
-  editable PowerPoint text frames with proper font sizes, colors, and alignments.
-- Font customization:
-  * "original" / "keep_original" (default): preserves fonts detected from the PDF.
-  * "Times New Roman"
-  * "Arial"
-  * "Calibri"
-  * "Georgia"
-  * Full Hindi / Devanagari support: automatically maps Devanagari runs to
-    system Unicode fonts (Noto Sans Devanagari / Arial Unicode MS).
-- Slide dimensions match each PDF page's aspect ratio and dimensions.
-- Scanned PDF fallback: if the page is a scan, embeds high-resolution image.
-"""
+"""PDF to PowerPoint: complete rendered pages, or editable text over a preserved graphics layer."""
 from __future__ import annotations
 
 import io
@@ -30,7 +11,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Length, Pt
 
-from .fonts import has_devanagari, has_non_latin, get_unicode_font_path
+from .fonts import has_devanagari, get_unicode_font_path
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -60,7 +41,8 @@ def _clean_pdf_font_name(raw_name: str | None) -> str:
     name = raw_name
     if "+" in name:
         name = name.split("+", 1)[1]
-    name = re.sub(r"[-_,].*$", "", name)
+    name = re.sub(r"[-,]?(BoldItalic|BoldOblique|Bold|Italic|Oblique|Regular|Roman|PSMT|MT)$", "", name)
+    name = {"TimesNewRomanPS": "Times New Roman", "ArialMT": "Arial"}.get(name, name)
     return name.strip() or "Arial"
 
 
@@ -111,7 +93,7 @@ def _add_text_box(slide: Any, text: str, x_emu: int, y_emu: int,
 
     txBox = slide.shapes.add_textbox(x_emu, y_emu, w_emu, h_emu)
     tf = txBox.text_frame
-    tf.word_wrap = True
+    tf.word_wrap = False
     tf.margin_left = 0
     tf.margin_right = 0
     tf.margin_top = 0
@@ -136,7 +118,7 @@ def _add_text_box(slide: Any, text: str, x_emu: int, y_emu: int,
 
     # Apply font choice at python-pptx and OOXML levels
     from pptx.oxml.ns import qn
-    is_unicode = has_devanagari(text) or has_non_latin(text)
+    is_unicode = has_devanagari(text)
     latin_font = target_font_name if (target_font_name and target_font_name != "original") else "Arial"
     run.font.name = unicode_font_name if is_unicode else latin_font
 
@@ -178,8 +160,9 @@ def _merge_line_spans(spans: list[dict]) -> list[dict]:
         same_size = abs(prev.get("size", 12) - span.get("size", 12)) < 1.5
         same_flags = prev.get("flags", 0) == span.get("flags", 0)
         same_color = prev.get("color", 0) == span.get("color", 0)
+        same_font = prev.get("font") == span.get("font")
 
-        if gap < prev.get("size", 12) * 0.75 and same_size and same_flags and same_color:
+        if 0 <= gap < prev.get("size", 12) * 0.75 and same_size and same_flags and same_color and same_font:
             sep = " " if gap > 1.0 else ""
             prev["text"] = prev["text"] + sep + span["text"]
             prev["bbox"] = (
@@ -196,153 +179,71 @@ def _merge_line_spans(spans: list[dict]) -> list[dict]:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def convert(data: bytes, font: str = "original") -> bytes:
-    pdf = fitz.open(stream=data, filetype="pdf")
-    selected_font = _normalize_font_choice(font)
-    unicode_font_name = _get_pptx_unicode_font_name()
-
+def convert(data: bytes, font: str = "original", fidelity: str = "editable") -> bytes:
+    from .quality import note
+    if fidelity not in ("appearance", "editable"):
+        raise ValueError("Choose appearance or editable conversion mode.")
     prs = Presentation()
-
-    for page_num in range(len(pdf)):
-        page = pdf[page_num]
-        rect = page.rect  # PDF points
-        page_w_pt = rect.width
-        page_h_pt = rect.height
-
-        slide_w_emu = _pt_to_emu(page_w_pt)
-        slide_h_emu = _pt_to_emu(page_h_pt)
-        prs.slide_width  = Length(slide_w_emu)
-        prs.slide_height = Length(slide_h_emu)
-
-        blank_layout = prs.slide_layouts[6]
-        slide = prs.slides.add_slide(blank_layout)
-
-        # ── 1. Background color detection ─────────────────────────────────────
-        try:
-            drawings = page.get_drawings()
-            for d in drawings:
-                d_rect = d.get("rect")
-                if d_rect and d_rect.width >= page_w_pt * 0.95 and d_rect.height >= page_h_pt * 0.95:
-                    fill = d.get("fill")
-                    if fill and len(fill) >= 3:
-                        bg_fill = slide.background.fill
-                        bg_fill.solid()
-                        bg_fill.fore_color.rgb = RGBColor(
-                            int(fill[0] * 255),
-                            int(fill[1] * 255),
-                            int(fill[2] * 255),
-                        )
-                        break
-        except Exception:
-            pass
-
-        # ── 2. Real embedded image extraction ─────────────────────────────────
-        page_images = page.get_images()
-        placed_images = 0
-
-        for img_info in page_images:
-            xref = img_info[0]
-            try:
-                rects = page.get_image_rects(xref)
-                if not rects:
-                    continue
-                base_img = pdf.extract_image(xref)
-                img_bytes = base_img.get("image")
-                if not img_bytes:
-                    continue
-
-                for img_rect in rects:
-                    # Skip invisible or 0-size images
-                    if img_rect.width < 2 or img_rect.height < 2:
-                        continue
-                    x_emu = _pt_to_emu(img_rect.x0)
-                    y_emu = _pt_to_emu(img_rect.y0)
-                    w_emu = _pt_to_emu(img_rect.width)
-                    h_emu = _pt_to_emu(img_rect.height)
-
-                    slide.shapes.add_picture(
-                        io.BytesIO(img_bytes),
-                        Length(x_emu), Length(y_emu),
-                        Length(w_emu), Length(h_emu),
-                    )
-                    placed_images += 1
-            except Exception:
+    selected_font = _normalize_font_choice(font)
+    unicode_font = _get_pptx_unicode_font_name()
+    with fitz.open(stream=data, filetype="pdf") as pdf:
+        if pdf.needs_pass:
+            raise ValueError("This PDF is password protected. Upload an unlocked copy.")
+        if not len(pdf):
+            raise ValueError("The PDF contains no pages.")
+        # PPTX supports one page size for the entire deck; center other sizes without stretching.
+        first = pdf[0].rect
+        canvas_w, canvas_h = first.width, first.height
+        # OOXML slide dimensions have a 56-inch maximum.
+        canvas_scale = min(1, 4032 / max(canvas_w, canvas_h))
+        canvas_w *= canvas_scale
+        canvas_h *= canvas_scale
+        prs.slide_width = Length(_pt_to_emu(canvas_w))
+        prs.slide_height = Length(_pt_to_emu(canvas_h))
+        for page in pdf:
+            rect = page.rect
+            scale = min(canvas_w / rect.width, canvas_h / rect.height)
+            left, top = (canvas_w - rect.width*scale)/2, (canvas_h - rect.height*scale)/2
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            native = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+            # A rendered graphics layer preserves masks, clipped/rotated images, paths and stacking.
+            # For editable output remove only text, retaining the complete graphics underneath.
+            with fitz.open() as background:
+                background.insert_pdf(pdf, from_page=page.number, to_page=page.number)
+                bg = background[0]
+                has_text = any(span.get("type") != 3 and span.get("chars") for span in page.get_texttrace())
+                horizontal = all(tuple(line.get("dir", (1, 0))) == (1, 0)
+                    for block in native.get("blocks", []) for line in block.get("lines", []))
+                editable = fidelity == "editable" and has_text and page.rotation == 0 and horizontal
+                if editable:
+                    bg.add_redact_annot(bg.rect, fill=False)
+                    bg.apply_redactions(images=0, graphics=0, text=0)
+                dpi = min(300, max(72, int(72 * (24_000_000/(rect.width*rect.height))**.5)))
+                pix = bg.get_pixmap(dpi=dpi, alpha=False, colorspace=fitz.csRGB)
+                slide.shapes.add_picture(io.BytesIO(pix.tobytes("png")),
+                    Length(_pt_to_emu(left)), Length(_pt_to_emu(top)),
+                    Length(_pt_to_emu(rect.width*scale)), Length(_pt_to_emu(rect.height*scale)))
+            if not editable:
+                if fidelity == "editable":
+                    note("Scanned, rotated or angled-text pages were preserved as images to avoid layout loss; their text is not editable.")
                 continue
-
-        # ── 3. Extract text blocks and spans ──────────────────────────────────
-        page_dict: dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)  # type: ignore[assignment]
-        blocks: list[dict] = page_dict.get("blocks", [])
-
-        total_text_chars = 0
-
-        for block in blocks:
-            if block.get("type") != 0:  # text block
-                continue
-            for line in block.get("lines", []):
-                raw_spans = []
-                for span in line.get("spans", []):
-                    raw = span.get("text", "").strip()
-                    if not raw:
-                        continue
-                    raw_spans.append(span)
-
-                merged_spans = _merge_line_spans(raw_spans)
-
-                for span in merged_spans:
-                    text = span.get("text", "").strip()
-                    if not text:
-                        continue
-
-                    total_text_chars += len(text)
-                    bbox = span["bbox"]
-                    x0, y0, x1, y1 = bbox
-                    span_w = x1 - x0
-                    span_h = y1 - y0
-                    if span_w < 0.5 or span_h < 0.5:
-                        continue
-
-                    x_emu = _pt_to_emu(x0)
-                    y_emu = _pt_to_emu(y0)
-                    w_emu = _pt_to_emu(span_w * 1.05)  # slight breathing room
-                    font_size = span.get("size", 12.0)
-                    h_emu = _pt_to_emu(max(span_h, font_size) * 1.3)
-
-                    flags = span.get("flags", 0)
-                    bold   = bool(flags & 2**4)
-                    italic = bool(flags & 2**1)
-                    color_int = span.get("color", 0x000000)
-
-                    # Determine target font
-                    if selected_font != "original":
-                        target_font = selected_font
-                    else:
-                        target_font = _clean_pdf_font_name(span.get("font"))
-
-                    _add_text_box(
-                        slide, text,
-                        x_emu, y_emu, w_emu, h_emu,
-                        font_size, bold, italic,
-                        color_int, "left",
-                        target_font,
-                        unicode_font_name,
-                    )
-
-        # ── 4. Scanned PDF fallback ───────────────────────────────────────────
-        # If no images and virtually no extractable text, render page as image
-        if placed_images == 0 and total_text_chars < 5:
-            try:
-                mat = fitz.Matrix(200 / 72.0, 200 / 72.0)
-                pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-                slide.shapes.add_picture(
-                    io.BytesIO(pix.tobytes("png")),
-                    Length(0), Length(0),
-                    Length(slide_w_emu), Length(slide_h_emu),
-                )
-            except Exception:
-                pass
-
-    out_buf = io.BytesIO()
-    prs.save(out_buf)
-    result = out_buf.getvalue()
-    assert len(result) > 1000, "Generated PPTX is empty"
-    return result
+            for block in native.get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in _merge_line_spans(line.get("spans", [])):
+                        x0, y0, x1, y1 = span["bbox"]
+                        flags = span.get("flags", 0)
+                        family = selected_font if selected_font != "original" else _clean_pdf_font_name(span.get("font"))
+                        _add_text_box(slide, span.get("text", ""),
+                            _pt_to_emu(left+x0*scale), _pt_to_emu(top+y0*scale),
+                            _pt_to_emu((x1-x0)*scale*1.03), _pt_to_emu((y1-y0)*scale),
+                            span.get("size", 12)*scale, bool(flags & 16), bool(flags & 2),
+                            span.get("color", 0), "left", family, unicode_font)
+            if page.get_text().strip():
+                note("Text is editable; graphics are preserved as a single image layer. Font substitution and complex text placement may differ.")
+        if fidelity == "appearance":
+            note("Pages are preserved as high-resolution slide images. Text and individual graphics are not editable.")
+        if any(abs(p.rect.width-first.width) > 1 or abs(p.rect.height-first.height) > 1 for p in pdf):
+            note("Mixed page sizes were fitted to a single slide size without stretching.")
+    output = io.BytesIO()
+    prs.save(output)
+    return output.getvalue()

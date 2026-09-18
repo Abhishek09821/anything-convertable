@@ -10,8 +10,8 @@ def make_non_searchable_pdf(pdf_bytes: bytes, dpi: int = 300) -> bytes:
     """
     Convert a vector / searchable PDF into a flattened, non-searchable (raster) PDF.
     Every page is rendered at high resolution (300 DPI) and inserted as an image.
-    The resulting PDF is visually indistinguishable from the original, but text
-    cannot be selected, copied, or machine-scraped (ideal for security & privacy).
+    Removes native text selection. This is not a security control: OCR can
+    recover text and rasterization reduces vector detail.
     """
     src_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     out_doc = fitz.open()

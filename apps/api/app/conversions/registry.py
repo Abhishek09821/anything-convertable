@@ -38,8 +38,8 @@ def _build() -> list[Conversion]:
         Conversion(
             id="image_to_pdf",
             label="Image → PDF",
-            description="Convert PNG, JPG or JPEG to a print-quality PDF at original resolution.",
-            accepts=frozenset({".png", ".jpg", ".jpeg"}),
+            description="Preserve image resolution, transparency, orientation and all TIFF pages.",
+            accepts=frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}),
             output_ext="pdf",
             output_mime="application/pdf",
             fn=_img_pdf,
@@ -68,7 +68,7 @@ def _build() -> list[Conversion]:
         Conversion(
             id="ppt_to_pdf",
             label="PowerPoint → PDF",
-            description="Convert a PPTX presentation to PDF with all slides rendered faithfully.",
+            description="Render PowerPoint slides to PDF with native Office layout support.",
             accepts=frozenset({".pptx"}),
             output_ext="pdf",
             output_mime="application/pdf",
@@ -79,7 +79,7 @@ def _build() -> list[Conversion]:
         Conversion(
             id="pdf_to_ppt",
             label="PDF → PowerPoint",
-            description="Convert a PDF to an editable PPTX — each page becomes a slide with selectable text.",
+            description="Convert PDF pages to slides with preserved appearance or editable native text.",
             accepts=frozenset({".pdf"}),
             output_ext="pptx",
             output_mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
