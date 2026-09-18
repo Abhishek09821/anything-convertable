@@ -135,3 +135,31 @@ textarea::placeholder { color: #a0a698; }
   .text-controls { grid-template-columns: minmax(0,1fr); }.field select, textarea { font-size: 16px; }.history { padding: 16px; }.site-footer { font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* Document format selection and exact custom layout controls. */
+.document-formats { margin-bottom: 24px; }
+.format-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.format-section-heading h3 { font-size: 12px; font-weight: 600; }
+.format-section-heading > span { font-size: 10px; color: var(--muted); }
+.document-format-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.document-format-card { text-align: left; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); }
+.document-format-card.selected, .custom-format-button.selected { border-color: #aabda2; background: #edf3e9; }
+.document-format-card:hover:not(:disabled), .custom-format-button:hover:not(:disabled) { border-color: #aabda2; }
+.document-format-top { display: flex; align-items: center; justify-content: space-between; color: var(--accent); margin-bottom: 3px; }
+.document-format-card strong { font-size: 13px; font-weight: 600; }
+.document-format-card > span:last-child { font-size: 11px; line-height: 1.6; color: var(--muted); }
+.custom-format-button { display: flex; gap: 9px; align-items: center; width: 100%; min-height: 46px; padding: 12px 16px; margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-size: 12px; text-align: left; }
+.custom-format-button > span { flex: 1; }
+.format-guidance, .content-preservation-note { font-size: 11px; color: var(--muted); line-height: 1.75; margin: 14px 0 18px; }
+.field input[type="text"] { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid #dbe1d6; border-radius: 7px; background: #fff; color: var(--ink); font-size: 14px; }
+.custom-format-fields { margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fafcf8; }
+.custom-format-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.custom-format-fields textarea { min-height: 110px; font-size: 14px; }
+@media (max-width: 440px) {
+  .document-format-card { padding: 12px; }
+  .document-format-card strong { font-size: 12px; }
+  .format-section-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .custom-format-grid { grid-template-columns: minmax(0, 1fr); }
+  .custom-format-fields { padding: 13px; }
+  .field input[type="text"], .custom-format-fields textarea { font-size: 16px; }
+}

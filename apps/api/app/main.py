@@ -94,7 +94,7 @@ def _detect_content(data: bytes) -> str:
     from PIL import Image
     try:
         with Image.open(io.BytesIO(data)) as image:
-            return {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "TIFF": ".tiff", "BMP": ".bmp", "GIF": ".gif"}.get(image.format, "")
+            return {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "TIFF": ".tiff", "BMP": ".bmp", "GIF": ".gif"}.get(image.format or "", "")
     except Exception:
         return ""
 
@@ -198,18 +198,23 @@ async def convert_text(req: TextConvertRequest):
     if fmt not in ("docx", "word", "pdf"):
         raise HTTPException(400, f"Unsupported output format '{req.to_format}'. Valid: docx, pdf")
 
+    options = {"font": req.font, "font_size": req.font_size,
+               "template": req.template, "title": req.title,
+               "custom_format": req.custom_format.model_dump() if req.custom_format else None}
     t0 = time.perf_counter()
     try:
         if fmt in ("docx", "word"):
-            result, warnings = await run_in_threadpool(_run_conversion, text_to_word, req.text, {"font": req.font, "font_size": req.font_size})
+            result, warnings = await run_in_threadpool(_run_conversion, text_to_word, req.text, options)
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            dl_name = "typed-document.docx"
+            dl_name = f"{req.template}-document.docx"
             out_id = "text_to_word"
         else:
-            result, warnings = await run_in_threadpool(_run_conversion, text_to_pdf, req.text, {"font": req.font, "font_size": req.font_size, "searchable": req.searchable})
+            result, warnings = await run_in_threadpool(_run_conversion, text_to_pdf, req.text, {**options, "searchable": req.searchable})
             media_type = "application/pdf"
-            dl_name = "typed-document.pdf"
+            dl_name = f"{req.template}-document.pdf"
             out_id = "text_to_pdf"
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     except Exception as exc:
         print(f"[convert_text] ERROR: {exc}")
         raise HTTPException(500, f"Text conversion failed: {exc}")

@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, ChevronRight, File, FileImage, FileText, Files, Image as ImageIcon, Info, Loader2, Presentation, RefreshCw, SlidersHorizontal, Type, Upload, X } from "lucide-react";
-import { ConversionInfo, DownloadResult, convertFile, convertText, detectFile, listConversions } from "../lib/api";
+import { CustomDocumentFormat, DocumentTemplate, ConversionInfo, DownloadResult, convertFile, convertText, detectFile, listConversions } from "../lib/api";
+
+import { DocumentFormatControls, DOCUMENT_FORMATS, DEFAULT_CUSTOM_FORMAT } from "./components/document-format-controls";
 
 const TOOLS = [
   { id: "image_to_pdf", title: "Image to PDF", description: "Keep every detail in your images.", formats: "JPG, PNG, WEBP, TIFF + more", icon: ImageIcon, ext: "PDF" },
@@ -42,6 +44,10 @@ export default function Home() {
   const [format, setFormat] = useState<"docx" | "pdf">("docx");
   const [textFont, setTextFont] = useState("Arial");
   const [fontSize, setFontSize] = useState(12);
+  const [documentTemplate, setDocumentTemplate] = useState<DocumentTemplate>("general");
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [customFormat, setCustomFormat] = useState<CustomDocumentFormat>(DEFAULT_CUSTOM_FORMAT);
+  const [sectionOrder, setSectionOrder] = useState("");
   const [textBusy, setTextBusy] = useState(false);
   const [textError, setTextError] = useState("");
   const [textResult, setTextResult] = useState<Result | null>(null);
@@ -50,6 +56,15 @@ export default function Home() {
   const busy = stage === "detecting" || stage === "converting";
   const tool = TOOLS.find(t => t.id === selected)!;
   const metadata = catalog.find(c => c.id === selected);
+  const documentPreset = DOCUMENT_FORMATS.find(item => item.id === documentTemplate);
+  useEffect(() => { setTextResult(null); setTextError(""); },
+    [text, format, textFont, fontSize, searchable, documentTemplate, documentTitle, customFormat, sectionOrder]);
+  function chooseDocumentTemplate(value: DocumentTemplate) {
+    setDocumentTemplate(value);
+    const preset = DOCUMENT_FORMATS.find(item => item.id === value);
+    if (preset) { setTextFont(preset.font); setFontSize(preset.size); }
+    if (value === "resume") setSearchable(true);
+  }
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
   const loadCatalog = () => { setCatalogError(""); listConversions().then(setCatalog).catch(() => setCatalogError("The conversion service is unavailable. Please try again.")); };
   useEffect(() => { loadCatalog(); }, []);
@@ -85,8 +100,15 @@ export default function Home() {
     if (!text.trim() || textBusy) return;
     setTextBusy(true); setTextError(""); setTextResult(null);
     try {
-      const output = await convertText({ text, to_format: format, font: textFont, font_size: fontSize, searchable });
-      const completed = { ...output, label: `Text to ${format === "docx" ? "Word" : "PDF"}` };
+      const output = await convertText({
+        text, to_format: format, font: textFont, font_size: fontSize,
+        searchable: documentTemplate === "resume" ? true : searchable,
+        template: documentTemplate, title: documentTitle,
+        ...(documentTemplate === "custom" ? { custom_format: {
+          ...customFormat, section_order: sectionOrder.split("\n").map(s => s.trim()).filter(Boolean),
+        } } : {}),
+      });
+      const completed = { ...output, label: `${documentPreset?.name ?? "Custom document"} · ${format === "docx" ? "Word" : "PDF"}` };
       setTextResult(completed); setHistory(h => [completed, ...h].slice(0, 5));
     } catch (e) { setTextError(e instanceof Error ? e.message : "Unable to create document."); }
     finally { setTextBusy(false); }
@@ -132,10 +154,14 @@ export default function Home() {
           <div className="panel-footnote"><Info size={14} /><span>Quality depends on your source. We flag conversion limitations with your result.</span></div>
           </>}
         </section>
-      </div> : <section className="text-panel"><div className="panel-heading"><div><span className="section-label">TEXT STUDIO</span><h2>A blank page. A fresh start.</h2><p>Write or paste your text, then make it a document.</p></div><Type size={28} strokeWidth={1.4} /></div>
+      </div> : <section className="text-panel"><div className="panel-heading"><div><span className="section-label">TEXT STUDIO</span><h2>Your content. The right structure.</h2><p>Choose a format, add your content, and create a Word document or PDF.</p></div><Type size={28} strokeWidth={1.4} /></div>
+        <DocumentFormatControls template={documentTemplate} title={documentTitle} custom={customFormat}
+          sectionOrder={sectionOrder} disabled={textBusy} onTemplate={chooseDocumentTemplate}
+          onTitle={setDocumentTitle} onCustom={setCustomFormat} onSectionOrder={setSectionOrder} />
         <div className="text-controls"><label className="field">Save as<select disabled={textBusy} value={format} onChange={e => setFormat(e.target.value as "docx" | "pdf")}><option value="docx">Word document (.docx)</option><option value="pdf">PDF document (.pdf)</option></select></label><label className="field">Font family<select disabled={textBusy} value={textFont} onChange={e => setTextFont(e.target.value)}>{FONTS.map(f => <option key={f}>{f}</option>)}</select></label><label className="field">Font size<select disabled={textBusy} value={fontSize} onChange={e => setFontSize(Number(e.target.value))}>{[10, 11, 12, 14, 16, 18, 24].map(n => <option key={n} value={n}>{n} pt</option>)}</select></label></div>
-        <label className="visually-hidden" htmlFor="document-text">Document text</label><textarea id="document-text" disabled={textBusy} value={text} onChange={e => setText(e.target.value)} placeholder="Your next document starts here…" rows={12} /><div className="editor-footer"><span>{wordCount} words · {text.length} characters</span><button className="text-button" disabled={textBusy || !text} onClick={() => { setText(""); setTextResult(null); }}>Clear text</button></div>
-        {format === "pdf" && <label className="check-field"><input type="checkbox" checked={searchable} disabled={textBusy} onChange={e => setSearchable(e.target.checked)} /> Keep text selectable</label>}
+        <label className="visually-hidden" htmlFor="document-text">Document text</label><textarea id="document-text" disabled={textBusy} value={text} onChange={e => setText(e.target.value)} maxLength={500000} placeholder={documentPreset?.placeholder ?? "# Your first section\nWrite your content here.\n\n# Your next section\nAdd the next section."} rows={12} /><div className="editor-footer"><span>{wordCount} words · {text.length} characters</span><button className="text-button" disabled={textBusy || !text} onClick={() => { setText(""); setTextResult(null); }}>Clear text</button></div>
+        {format === "pdf" && <label className="check-field"><input type="checkbox" checked={documentTemplate === "resume" || searchable} disabled={textBusy || documentTemplate === "resume"} onChange={e => setSearchable(e.target.checked)} /> {documentTemplate === "resume" ? "Selectable text is required for résumé PDFs" : "Keep text selectable"}</label>}
+        <p className="content-preservation-note">Your wording, dates and figures are kept. Headings and list markers control structure; no facts or missing sections are invented.</p>
         {textError && <div className="notice error" role="alert">{textError}</div>}
         <button className="button primary full" disabled={!text.trim() || textBusy} onClick={runText}>{textBusy ? <><Loader2 size={17} className="spin" /> Creating document…</> : <>Create {format === "docx" ? "Word document" : "PDF"} <ArrowRight size={17} /></>}</button>
         {textResult && resultPanel(textResult)}

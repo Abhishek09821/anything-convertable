@@ -82,3 +82,15 @@ The regression suite covers image pixels, JPEG stream preservation, palette tran
 For release validation, also compare representative real documents against their rendered sources, especially multi-column scans, unusual scripts, mathematical notation and custom Office effects. Automated fixtures cannot establish universal accuracy.
 
 Implementation references: [LibreOffice PDF export parameters](https://help.libreoffice.org/latest/en-US/text/shared/guide/pdf_params.html), [PyMuPDF page operations](https://pymupdf.readthedocs.io/en/latest/page.html).
+
+## Text studio document formats
+
+The text studio includes **General document**, **Formal letter**, **Business report**, and **ATS-friendly résumé**, plus **Custom format**, for both DOCX and PDF. Selecting a preset sets a starting font and size; users can change these. Optional titles, semantic headings, bullets, spacing, margins, and paragraph pagination are generated directly in Word. Résumés use one column without tables or text boxes, and PDF output must retain selectable text. There is no claimed ATS score or job-match analysis.
+
+Content is formatted deterministically rather than rewritten: names, dates, figures and wording are not generated or embellished. Use `# Heading`, `## Subheading`, `### Subheading` and `- bullet` syntax. Familiar standalone résumé/report headings are recognized too. Plain lines and supplied numbered lists remain in their original order.
+
+Custom format supports A4/Letter, margins, line spacing, heading size/alignment and a user-defined section order. List one existing main heading per line. Missing/duplicate section names produce an actionable error; unlisted sections are appended, and introductory content stays at the beginning. This is an explicit layout builder, not an arbitrary natural-language instruction interpreter or uploaded-template importer.
+
+The API accepts `template` (`general`, `formal`, `report`, `resume`, `custom`), `title`, and `custom_format` with `page_size`, `margin_inches`, `line_spacing`, `heading_size`, `heading_alignment` and `section_order`. PDF export renders the same generated DOCX through LibreOffice; if unavailable, the request asks the user to download Word or install the renderer instead of silently using a different layout.
+
+This addition was implemented without running tests, builds, or browser checks, as requested.

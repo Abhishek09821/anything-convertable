@@ -10,7 +10,10 @@ export interface DetectResponse { ext: string; suggested: string[]; all_conversi
 async function checked(response: Response) {
   if (!response.ok) {
     const data = await response.json().catch(() => null);
-    throw new Error(typeof data?.detail === "string" ? data.detail : `Request failed (${response.status}). Please try again.`);
+    const detail = Array.isArray(data?.detail)
+      ? data.detail.map((item: { loc?: (string | number)[]; msg?: string }) => `${item.loc?.slice(1).join(".") ?? "Input"}: ${item.msg ?? "Invalid value"}`).join(" ")
+      : data?.detail;
+    throw new Error(typeof detail === "string" ? detail : `Request failed (${response.status}). Please try again.`);
   }
   return response;
 }
@@ -37,7 +40,19 @@ export async function convertFile(file: File, id: string, font = "original", sea
   const ext = id === "pdf_to_word" ? "docx" : id === "pdf_to_ppt" ? "pptx" : "pdf";
   return download(await fetch(`${API}/v1/convert/${id}?${query}`, { method: "POST", body }), `converted.${ext}`);
 }
-export interface ConvertTextParams { text: string; to_format: "docx" | "pdf"; font?: string; font_size?: number; searchable?: boolean }
+export type DocumentTemplate = "general" | "formal" | "report" | "resume" | "custom";
+export interface CustomDocumentFormat {
+  page_size: "A4" | "Letter";
+  margin_inches: number;
+  line_spacing: number;
+  heading_size: number;
+  heading_alignment: "left" | "center";
+  section_order: string[];
+}
+export interface ConvertTextParams {
+  text: string; to_format: "docx" | "pdf"; font?: string; font_size?: number; searchable?: boolean;
+  template?: DocumentTemplate; title?: string; custom_format?: CustomDocumentFormat;
+}
 export async function convertText(params: ConvertTextParams) {
   return download(await fetch(`${API}/v1/convert-text`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
