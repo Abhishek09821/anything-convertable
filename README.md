@@ -4,7 +4,7 @@
   <h1>Anything Convertable</h1>
 
   <p><strong>New format. Same attention to detail.</strong></p>
-  <p>Convert documents, images, and presentations—or turn your words into a document.<br />Five file converters. One Text Studio. A focused workspace.</p>
+  <p>Convert documents, images, and presentations - or turn your words into a document.<br />Five file converters. One Text Studio. A focused workspace.</p>
 
   <p>
     <img src="https://img.shields.io/badge/Next.js-151c17?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" />
