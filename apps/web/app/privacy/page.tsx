@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Files, ArrowLeft, ShieldCheck, Lock, Trash2, EyeOff, Linkedin, CheckCircle } from "lucide-react";
-import { ThemeToggle } from "../components/theme-toggle";
-import { SiteFooter } from "../components/site-footer";
+import { ArrowLeft, ShieldCheck, Lock, Trash2, EyeOff, Linkedin, CheckCircle } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "Privacy Policy – Anything Convertable",
@@ -12,28 +10,12 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <div className="header-inner">
-          <Link className="brand" href="/" aria-label="Anything Convertable home">
-            <span className="brand-mark">
-              <Files size={21} />
-            </span>
-            <span>
-              Anything<span className="brand-light"> Convertable</span>
-            </span>
-          </Link>
-          <div className="header-actions">
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
-
+    <>
       <main className="main privacy-main">
         <div className="privacy-container">
           <div className="privacy-header">
             <Link href="/" className="back-link">
-              <ArrowLeft size={16} /> Back to Converter
+              <ArrowLeft size={16} /> Back to Home
             </Link>
             <div className="privacy-badge">
               <ShieldCheck size={16} /> Privacy First
@@ -99,7 +81,7 @@ export default function PrivacyPage() {
                   <CheckCircle size={18} className="policy-check" />
                   <div>
                     <strong>Local Preferences (Client-Side Only)</strong>
-                    <p>Your chosen theme (Light / Dark mode) is saved in your browser&apos;s local storage. Your recent conversion history stays exclusively in your local browser session.</p>
+                    <p>Your recent conversion history stays exclusively in your local browser session.</p>
                   </div>
                 </div>
               </div>
@@ -150,7 +132,7 @@ export default function PrivacyPage() {
         </div>
       </main>
 
-      <SiteFooter />
-    </div>
+
+    </>
   );
 }

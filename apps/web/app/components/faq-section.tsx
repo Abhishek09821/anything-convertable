@@ -32,7 +32,7 @@ const FAQS: FAQItem[] = [
   {
     question: "What is Text Studio and how do I use it?",
     answer:
-      "Text Studio is our built-in authoring tool. Switch to the 'Write a document' tab, type or paste your content, choose your preferred font, layout template (Resume, Report, Memo, etc.), and export directly to a polished Word (.docx) or PDF file in one click.",
+      "Text Studio is our built-in authoring tool. Open the Text Studio page, type or paste your content, choose your preferred font, layout template (Resume, Report, Memo, etc.), and export directly to a polished Word (.docx) or PDF file in one click.",
   },
   {
     question: "What is the maximum file size supported?",
@@ -54,7 +54,7 @@ export function FaqSection() {
         <div className="eyebrow">
           <span /> FREQUENTLY ASKED QUESTIONS
         </div>
-        <h2 id="faq-heading">Got Questions? We Have Answers.</h2>
+        <h1 id="faq-heading">Got Questions? We Have Answers.</h1>
         <p>Everything you need to know about formats, privacy, fidelity, and limits.</p>
       </div>
 

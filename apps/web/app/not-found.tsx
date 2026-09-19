@@ -1,27 +1,9 @@
 import Link from "next/link";
-import { Files, ArrowLeft, FileQuestion, Sparkles } from "lucide-react";
-import { ThemeToggle } from "./components/theme-toggle";
-import { SiteFooter } from "./components/site-footer";
+import { ArrowLeft, FileQuestion, Sparkles } from "lucide-react";
 
 export default function NotFound() {
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <div className="header-inner">
-          <Link className="brand" href="/" aria-label="Anything Convertable home">
-            <span className="brand-mark">
-              <Files size={21} />
-            </span>
-            <span>
-              Anything<span className="brand-light"> Convertable</span>
-            </span>
-          </Link>
-          <div className="header-actions">
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
-
+    <>
       <main className="main not-found-main">
         <div className="not-found-card">
           <div className="not-found-badge">
@@ -37,7 +19,7 @@ export default function NotFound() {
 
           <div className="not-found-actions">
             <Link href="/" className="button primary">
-              <ArrowLeft size={16} /> Return to Converter
+              <ArrowLeft size={16} /> Return to Home
             </Link>
             <Link href="/privacy" className="button secondary">
               View Privacy Policy
@@ -50,16 +32,16 @@ export default function NotFound() {
               <span>Looking for quick conversions?</span>
             </div>
             <div className="popular-links">
-              <Link href="/#workspace" className="quick-pill">Image to PDF</Link>
-              <Link href="/#workspace" className="quick-pill">Word to PDF</Link>
-              <Link href="/#workspace" className="quick-pill">PDF to Word</Link>
-              <Link href="/#workspace" className="quick-pill">PPT to PDF</Link>
+              <Link href="/converters/image-to-pdf" className="quick-pill">Image to PDF</Link>
+              <Link href="/converters/word-to-pdf" className="quick-pill">Word to PDF</Link>
+              <Link href="/converters/pdf-to-word" className="quick-pill">PDF to Word</Link>
+              <Link href="/converters/ppt-to-pdf" className="quick-pill">PPT to PDF</Link>
             </div>
           </div>
         </div>
       </main>
 
-      <SiteFooter />
-    </div>
+
+    </>
   );
 }

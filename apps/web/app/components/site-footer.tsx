@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Files, Linkedin, ShieldCheck, Heart } from "lucide-react";
+import { Files, Linkedin, ShieldCheck } from "lucide-react";
 
 export function SiteFooter() {
   return (
@@ -21,7 +21,7 @@ export function SiteFooter() {
             </p>
             <div className="footer-developer-badge">
               <span className="developed-by">
-                Crafted with <Heart size={14} className="heart-icon" /> by
+                Developed by
               </span>
               <a
                 href="https://www.linkedin.com/in/abhishek-tiwari-3a3594300/"
@@ -40,19 +40,19 @@ export function SiteFooter() {
             <div className="footer-col">
               <h4>Conversions</h4>
               <ul>
-                <li><Link href="/#workspace">Image to PDF</Link></li>
-                <li><Link href="/#workspace">Word to PDF</Link></li>
-                <li><Link href="/#workspace">PDF to Word</Link></li>
-                <li><Link href="/#workspace">PowerPoint to PDF</Link></li>
-                <li><Link href="/#workspace">PDF to PowerPoint</Link></li>
+                <li><Link href="/converters/image-to-pdf">Image to PDF</Link></li>
+                <li><Link href="/converters/word-to-pdf">Word to PDF</Link></li>
+                <li><Link href="/converters/pdf-to-word">PDF to Word</Link></li>
+                <li><Link href="/converters/ppt-to-pdf">PowerPoint to PDF</Link></li>
+                <li><Link href="/converters/pdf-to-ppt">PDF to PowerPoint</Link></li>
               </ul>
             </div>
 
             <div className="footer-col">
               <h4>Studio & Info</h4>
               <ul>
-                <li><Link href="/#workspace">Text Studio</Link></li>
-                <li><Link href="/#faqs">Frequently Asked Questions</Link></li>
+                <li><Link href="/text-studio">Text Studio</Link></li>
+                <li><Link href="/faqs">Frequently Asked Questions</Link></li>
                 <li>
                   <Link href="/privacy" className="privacy-link-highlight">
                     <ShieldCheck size={14} /> Privacy Policy
