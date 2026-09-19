@@ -1937,3 +1937,18 @@ textarea::placeholder {
 @media (max-width: 540px) {
   .landing-converters { padding-top: 30px; }
 }
+
+.faq-contact {
+  margin-top: 28px;
+  padding: 28px 20px;
+  text-align: center;
+  background: var(--accent-subtle);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.faq-contact h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+.faq-contact p { margin: 10px 0 16px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.faq-contact-link { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: var(--accent); font-size: 14px; font-weight: 600; }
+.faq-contact-link svg { flex-shrink: 0; }
+.faq-contact-link span { overflow-wrap: anywhere; }
+.faq-contact-link:hover span { text-decoration: underline; text-underline-offset: 3px; }

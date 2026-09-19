@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, HelpCircle } from "lucide-react";
+import { ChevronDown, HelpCircle, Mail } from "lucide-react";
 
 interface FAQItem {
   question: string;
@@ -97,6 +97,15 @@ export function FaqSection() {
             </div>
           );
         })}
+      </div>
+
+      <div className="faq-contact" aria-labelledby="faq-contact-heading">
+        <h2 id="faq-contact-heading">Still have a question?</h2>
+        <p>For questions, feedback, or help with a conversion, get in touch by email.</p>
+        <a href="mailto:abhishek.tiwarii9821@gmail.com" className="faq-contact-link">
+          <Mail size={18} aria-hidden="true" />
+          <span>abhishek.tiwarii9821@gmail.com</span>
+        </a>
       </div>
     </section>
   );
