@@ -257,10 +257,6 @@ export default function Workspace({ mode, initialTool = "image_to_pdf" }: { mode
 
   return (
     <>
-      <a href="#workspace" className="skip-link">
-        Skip to converter
-      </a>
-
       <main className="main">
         <section className="hero workspace-hero">
           <div className="eyebrow"><span /> {tab === "files" ? "FILE CONVERTER" : "TEXT STUDIO"}</div>

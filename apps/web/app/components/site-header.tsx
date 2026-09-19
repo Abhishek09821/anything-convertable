@@ -11,8 +11,8 @@ export function SiteHeader() {
       <span>Anything<span className="brand-light"> Convertable</span></span>
     </Link>
     <nav className="header-nav-links" aria-label="Main navigation">
-      {[["/converters", "Converter"], ["/text-studio", "Text Studio"], ["/faqs", "FAQs"], ["/privacy", "Privacy"]].map(([href, label]) =>
-        <Link key={href} href={href} className="header-nav-link" aria-current={pathname.startsWith(href) ? "page" : undefined}>{label}</Link>
+      {[["/", "Home"], ["/converters", "Converter"], ["/text-studio", "Text Studio"], ["/faqs", "FAQs"], ["/privacy", "Privacy"]].map(([href, label]) =>
+        <Link key={href} href={href} className="header-nav-link" aria-current={(href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`)) ? "page" : undefined}>{label}</Link>
       )}
     </nav>
   </div></header>;
