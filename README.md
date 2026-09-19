@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="apps/web/app/icon.png" alt="Anything Convertable logo" width="112" height="112" />
+  <img src="apps/web/public/icon.png" alt="Anything Convertable logo" width="112" height="112" />
 
   <h1>Anything Convertable</h1>
 
@@ -197,7 +197,8 @@ Legacy Office renderers remain available for file conversions when LibreOffice i
 anything-editable/
 ├── apps/
 │   ├── web/                    # Next.js frontend
-│   │   ├── app/                # Pages, shared components, styles, and favicon
+│   │   ├── app/                # Pages, shared components, and styles
+│   │   ├── public/             # Static assets and favicon
 │   │   └── lib/                # Browser API client
 │   └── api/                    # FastAPI backend
 │       ├── app/conversions/    # Converters, OCR, fonts, and document templates

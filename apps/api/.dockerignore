@@ -1,0 +1,14 @@
+# Keep local environments, caches, and secrets out of the build context.
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+*.log
+.DS_Store
+.coverage
+htmlcov/

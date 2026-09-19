@@ -11,6 +11,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  icons: { icon: [{ url: "/icon.png", type: "image/png" }] },
   title: "Anything Convertable – Convert PDF, Word, PPT & Images Online",
   description:
     "Convert PDF, Word, PowerPoint and images online with Anything Convertable. Fast, simple and secure document conversion.",
