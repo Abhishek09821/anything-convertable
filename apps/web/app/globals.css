@@ -1903,9 +1903,6 @@ textarea::placeholder {
 .workspace-hero .back-link { margin: 12px 0 0; }
 .faq-page .faq-section { border-top: 0; margin-top: 0; padding-top: 48px; }
 @media (max-width: 768px) {
-  .header-inner { flex-wrap: wrap; justify-content: center; gap: 12px; padding-block: 13px; }
-  .header-nav-links { display: flex; justify-content: center; gap: clamp(12px, 3vw, 24px); width: 100%; }
-  .header-nav-link { padding: 8px 5px; font-size: 12px; }
   .landing-hero { padding: 40px 0 30px; }
   .landing-hero h1 { letter-spacing: -1.5px; }
   .converter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1952,3 +1949,53 @@ textarea::placeholder {
 .faq-contact-link svg { flex-shrink: 0; }
 .faq-contact-link span { overflow-wrap: anywhere; }
 .faq-contact-link:hover span { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Compact mobile navigation; desktop keeps its inline links. */
+.mobile-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface);
+}
+.mobile-nav-toggle:hover, .mobile-nav-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+@media (max-width: 768px) {
+  .header-inner {
+    min-height: 68px;
+    padding-block: 10px;
+    gap: 10px;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+  }
+  .site-header .brand { min-width: 0; gap: 8px; font-size: 15px; }
+  .mobile-nav-toggle { display: inline-flex; }
+  .header-nav-links {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 14px;
+    right: 14px;
+    max-height: calc(100dvh - 92px);
+    overflow-y: auto;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-float);
+    gap: 4px;
+  }
+  .header-nav-links.is-open { display: flex; flex-direction: column; align-items: stretch; }
+  .header-nav-link { display: flex; align-items: center; min-height: 46px; padding: 12px 14px; font-size: 15px; }
+}
+@media (max-width: 360px) {
+  .site-header .brand { font-size: 13px; gap: 6px; }
+  .site-header .brand-mark { width: 30px; height: 30px; }
+}
