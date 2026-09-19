@@ -1,13 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Files } from "lucide-react";
+import { BrandMark } from "./brand-mark";
 
 export function SiteHeader() {
   const pathname = usePathname();
   return <header className="site-header"><div className="header-inner">
     <Link className="brand" href="/" aria-label="Anything Convertable home">
-      <span className="brand-mark"><Files size={21} /></span>
+      <BrandMark />
       <span>Anything<span className="brand-light"> Convertable</span></span>
     </Link>
     <nav className="header-nav-links" aria-label="Main navigation">

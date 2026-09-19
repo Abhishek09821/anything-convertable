@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Files, Linkedin, ShieldCheck } from "lucide-react";
+import { BrandMark } from "./brand-mark";
+import { Linkedin, ShieldCheck } from "lucide-react";
 
 export function SiteFooter() {
   return (
@@ -8,9 +9,7 @@ export function SiteFooter() {
         <div className="footer-top">
           <div className="footer-brand-col">
             <Link href="/" className="brand" aria-label="Anything Convertable home">
-              <span className="brand-mark">
-                <Files size={20} />
-              </span>
+              <BrandMark />
               <span>
                 Anything<span className="brand-light"> Convertable</span>
               </span>
