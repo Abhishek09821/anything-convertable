@@ -43,7 +43,7 @@ The interface uses a consistent light theme, dedicated tool pages, and shared na
 
 ### Supported conversions
 
-| Tool | Input | Output |
+| Tools | Inputs | Outputs |
 | --- | --- | --- |
 | Image to PDF | JPG, PNG, WEBP, TIFF, BMP, GIF | PDF |
 | Word to PDF | DOCX | PDF |
